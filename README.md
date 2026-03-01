@@ -5,7 +5,7 @@ tags:
   - area/tech-notes/opencode
 ---
 
-# Goals Dashboard（Leantime 风格 Goal Board）
+# Planning Hub（Goal / Kanban Todo / Milestone）
 
 相关链接：[[tech-notes/obsidian-goals-plugin-implementation-plan]] [[tech-notes/README]]
 
@@ -66,7 +66,7 @@ milestoneTarget: 12
 ## 3) 如何开启和使用
 
 1. 把目标笔记放到 `Goals/`（或在插件设置里改 `Goals folder`）。
-2. 在 Obsidian 启用插件后，点击左侧 `target` 图标或命令面板执行 `Open Goals Dashboard`（会在主工作区以标签页打开，不再固定到右侧边栏）。
+2. 在 Obsidian 启用插件后，点击左侧 `target` 图标或命令面板执行 `Open Planning Hub`（会在主工作区以标签页打开，不再固定到右侧边栏）。
 3. 每个 board 顶部会显示总览（Progress、On Track、At Risk、Miss）。
 4. 可拖拽 board 区块手动调整显示顺序（会持久保存）。
 5. 可点击 board 标题右侧 `Archive` 按钮，一键归档整个 board（会把该 board 下目标写入 `boardArchived: true` 并隐藏）。
@@ -74,8 +74,8 @@ milestoneTarget: 12
 7. 每张卡片可直接修改基础字段（`title`、`board`、`metric`、`start/current/target`、`due`、`status`），无需打开原始 Markdown。
 8. 在 dashboard 顶部点击 `Create New Goal` 可直接新建目标文件（填写名称、board、metric、target、due）。
 9. 编辑任意目标文件后，面板会自动刷新（也可点 `Refresh`）。
-10. 点击右上角 `Milestones`（或命令 `Open Milestones`）可打开里程碑页，查看 milestone->goal->todo 关系。
-11. 里程碑看板（拖拽列、状态流转等）后续再实现，当前先提供聚合视图。
+10. 点击右上角 `Milestone Kanban`（或命令 `Open Milestone Kanban`）可打开里程碑看板，按 milestone 聚合 goal 与 todo。
+11. 看板采用自适应列布局，优先上下滚动，避免横向滚动。
 
 ## 4) 常见问题
 

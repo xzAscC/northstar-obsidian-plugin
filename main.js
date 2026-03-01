@@ -30,23 +30,23 @@ class GoalsDashboardPlugin extends Plugin {
       (leaf) => new MilestoneDashboardView(leaf, this),
     );
 
-    this.addRibbonIcon("target", "Open Goals Dashboard", () => {
+    this.addRibbonIcon("target", "Open Planning Hub", () => {
       this.activateView();
     });
 
     this.addCommand({
       id: "open-goals-dashboard",
-      name: "Open Goals Dashboard",
+      name: "Open Planning Hub",
       callback: () => this.activateView(),
     });
 
-    this.addRibbonIcon("flag", "Open Milestones", () => {
+    this.addRibbonIcon("flag", "Open Milestone Kanban", () => {
       this.activateMilestoneView();
     });
 
     this.addCommand({
       id: "open-milestones-dashboard",
-      name: "Open Milestones",
+      name: "Open Milestone Kanban",
       callback: () => this.activateMilestoneView(),
     });
 
@@ -301,7 +301,7 @@ class GoalsDashboardView extends ItemView {
   }
 
   getDisplayText() {
-    return "Goals Dashboard";
+    return "Planning Hub";
   }
 
   getIcon() {
@@ -355,7 +355,7 @@ class GoalsDashboardView extends ItemView {
     container.addClass("goals-dashboard-view");
 
     const header = container.createDiv({ cls: "goals-dashboard-header" });
-    header.createEl("h2", { text: "Goals Dashboard" });
+    header.createEl("h2", { text: "Planning Hub" });
 
     const headerActions = header.createDiv({ cls: "goals-dashboard-header-actions" });
 
@@ -381,7 +381,7 @@ class GoalsDashboardView extends ItemView {
 
     const milestoneButton = headerActions.createEl("button", {
       cls: "goals-dashboard-refresh",
-      text: "Milestones",
+      text: "Milestone Kanban",
     });
     milestoneButton.addEventListener("click", async () => {
       await this.plugin.activateMilestoneView();
@@ -878,7 +878,7 @@ class MilestoneDashboardView extends ItemView {
   }
 
   getDisplayText() {
-    return "Milestones";
+    return "Milestone Kanban";
   }
 
   getIcon() {
@@ -931,7 +931,7 @@ class MilestoneDashboardView extends ItemView {
     container.addClass("milestones-dashboard-view");
 
     const header = container.createDiv({ cls: "goals-dashboard-header" });
-    header.createEl("h2", { text: "Milestones" });
+    header.createEl("h2", { text: "Milestone Kanban" });
 
     const headerActions = header.createDiv({ cls: "goals-dashboard-header-actions" });
     const goalsButton = headerActions.createEl("button", {
@@ -948,11 +948,6 @@ class MilestoneDashboardView extends ItemView {
     });
     refreshButton.addEventListener("click", () => this.render());
 
-    container.createEl("p", {
-      cls: "milestones-description",
-      text: "Milestone Kanban will be implemented later. This page currently shows milestone-linked goals and markdown todos.",
-    });
-
     const milestones = await this.plugin.getMilestones();
     if (milestones.length === 0) {
       container.createEl("p", {
@@ -962,23 +957,27 @@ class MilestoneDashboardView extends ItemView {
       return;
     }
 
-    const list = container.createDiv({ cls: "milestone-list" });
+    const list = container.createDiv({ cls: "milestone-kanban-board" });
     for (const milestone of milestones) {
-      const card = list.createDiv({ cls: "milestone-card" });
-      const top = card.createDiv({ cls: "milestone-card-top" });
+      const card = list.createDiv({ cls: "milestone-lane" });
+      const top = card.createDiv({ cls: "milestone-lane-top" });
       top.createEl("h3", {
-        cls: "milestone-card-title",
+        cls: "milestone-lane-title",
         text: milestone.name,
       });
 
-      const stats = top.createDiv({ cls: "milestone-card-stats" });
+      const stats = top.createDiv({ cls: "milestone-lane-stats" });
       stats.createEl("span", {
         cls: "milestone-stat-chip",
         text: `Goals ${milestone.goals.length}`,
       });
       stats.createEl("span", {
         cls: "milestone-stat-chip",
-        text: `Todo ${milestone.todoOpen}/${milestone.todoOpen + milestone.todoDone}`,
+        text: `Todo ${milestone.todoOpen + milestone.todoDone}`,
+      });
+      stats.createEl("span", {
+        cls: "milestone-stat-chip",
+        text: `Open ${milestone.todoOpen}`,
       });
 
       if (milestone.due) {
@@ -988,62 +987,39 @@ class MilestoneDashboardView extends ItemView {
         });
       }
 
-      const body = card.createDiv({ cls: "milestone-card-body" });
-      const goalsCol = body.createDiv({ cls: "milestone-column" });
-      goalsCol.createEl("h4", {
-        cls: "milestone-column-title",
-        text: "Goals",
-      });
-
-      const goalsList = goalsCol.createEl("ul", { cls: "milestone-goal-list" });
+      const goalsList = card.createDiv({ cls: "milestone-goal-pill-list" });
       for (const goal of milestone.goals) {
-        const item = goalsList.createEl("li", { cls: "milestone-goal-item" });
-        const openButton = item.createEl("button", {
-          cls: "milestone-goal-link",
-          text: `${goal.title} (${goal.percent}%)`,
+        const openButton = goalsList.createEl("button", {
+          cls: "milestone-goal-pill",
+          text: `${goal.title} ${goal.percent}%`,
         });
 
         openButton.addEventListener("click", async () => {
           await this.openGoalInRightPane(goal.file);
         });
-
-        item.createEl("span", {
-          cls: "milestone-goal-board",
-          text: goal.board,
-        });
       }
 
-      const todoCol = body.createDiv({ cls: "milestone-column" });
-      todoCol.createEl("h4", {
-        cls: "milestone-column-title",
-        text: "Todo",
-      });
-
       if (milestone.todos.length === 0) {
-        todoCol.createEl("p", {
+        card.createEl("p", {
           cls: "milestone-todo-empty",
           text: "No markdown todos in linked goals.",
         });
       } else {
-        const todoList = todoCol.createEl("ul", { cls: "milestone-todo-list" });
-        for (const todo of milestone.todos.slice(0, 12)) {
-          const todoItem = todoList.createEl("li", {
+        const todoList = card.createDiv({ cls: "milestone-todo-list" });
+        for (const todo of milestone.todos) {
+          const todoItem = todoList.createDiv({
             cls: todo.done ? "milestone-todo-item is-done" : "milestone-todo-item",
           });
           todoItem.createSpan({
             cls: "milestone-todo-text",
-            text: todo.text,
+            text: `${todo.done ? "Done" : "Todo"}: ${todo.text}`,
           });
-          todoItem.createSpan({
-            cls: "milestone-todo-goal",
+          const openGoalButton = todoItem.createEl("button", {
+            cls: "milestone-todo-goal-link",
             text: todo.goalTitle,
           });
-        }
-
-        if (milestone.todos.length > 12) {
-          todoCol.createEl("p", {
-            cls: "milestone-todo-more",
-            text: `+${milestone.todos.length - 12} more todos`,
+          openGoalButton.addEventListener("click", async () => {
+            await this.openGoalInRightPane(todo.goalFile);
           });
         }
       }
@@ -1061,7 +1037,7 @@ class GoalsDashboardSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "Goals Dashboard settings" });
+    containerEl.createEl("h2", { text: "Planning Hub settings" });
 
     new Setting(containerEl)
       .setName("Goals folder")

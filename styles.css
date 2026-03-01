@@ -406,6 +406,9 @@
 .milestones-dashboard-view {
   --milestone-card-bg: color-mix(in srgb, var(--background-secondary) 86%, #d5f0e4 14%);
   --milestone-card-border: color-mix(in srgb, var(--background-modifier-border) 70%, #78bca8 30%);
+  height: calc(100vh - 120px);
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .milestones-description {
@@ -416,6 +419,84 @@
 .milestone-list {
   display: grid;
   gap: 12px;
+}
+
+.milestone-kanban-board {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  overflow-x: hidden;
+}
+
+.milestone-lane {
+  background: var(--milestone-card-bg);
+  border: 1px solid var(--milestone-card-border);
+  border-radius: 14px;
+  display: grid;
+  gap: 10px;
+  min-height: 240px;
+  padding: 12px;
+}
+
+.milestone-lane-top {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.milestone-lane-title {
+  margin: 0;
+}
+
+.milestone-lane-stats {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.milestone-goal-pill-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.milestone-goal-pill {
+  background: color-mix(in srgb, var(--background-primary) 84%, #5ca697 16%);
+  border: 1px solid color-mix(in srgb, var(--milestone-card-border) 84%, transparent);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.milestone-todo-list {
+  display: grid;
+  gap: 8px;
+}
+
+.milestone-todo-item {
+  background: color-mix(in srgb, var(--background-primary) 90%, #7bbca8 10%);
+  border: 1px solid color-mix(in srgb, var(--milestone-card-border) 76%, transparent);
+  border-radius: 10px;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+}
+
+.milestone-todo-goal-link {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  justify-self: start;
+  padding: 0;
+}
+
+.milestone-todo-goal-link:hover {
+  color: var(--text-accent);
+  text-decoration: underline;
 }
 
 .milestone-card {

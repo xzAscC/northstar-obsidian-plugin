@@ -1,9 +1,9 @@
 {
   "id": "goals-dashboard",
-  "name": "Goals Dashboard",
+  "name": "Planning Hub (Goals/Kanban/Todo/Milestones)",
   "version": "0.3.0",
   "minAppVersion": "1.4.0",
-  "description": "Leantime-style goal board plus milestone overview for related goals and todos.",
+  "description": "Unified planning hub for goals, milestone kanban, and related markdown todos.",
   "author": "xzascc",
   "isDesktopOnly": false
 }
