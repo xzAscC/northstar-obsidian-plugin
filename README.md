@@ -15,6 +15,8 @@ tags:
 - `Milestone Kanban`：集中查看某个里程碑下包含的 goal 与 markdown todo。
 - `Kanban Todo`：读取 `Kanban/` 目录中的 todo 文件（每个 todo 一个 `.md` 文件），直接在 Planning Hub 里查看未完成待办。
 
+> 注意：`milestone`、`list`、`priority` 等字段必须写在 Markdown 文件开头的 frontmatter（Obsidian Properties）里，不能只写在正文。
+
 ## 1) 目标文件格式
 
 每个目标一个 Markdown 文件，建议放在 `Goals/` 目录。
@@ -81,9 +83,11 @@ milestoneTarget: 12
 11. 点击 `Kanban Todo`（或命令 `Open Kanban Todo`）可打开 Kanban 任务视图，按「一个文件一个 todo」展示。
 12. 在 `Kanban Todo` 页点击 `Create New Todo` 可直接新建 todo 文件（填写名称与任务内容）。
 13. 每个 todo 文件正文建议使用单行 checkbox：`- [ ] 任务内容`。
-14. 视图会同时展示未完成与已完成项，已完成项自动排在列表后部。
-15. 可在面板里直接点击 checkbox 切换 `- [ ]` / `- [x]`，并写回原文件。
-16. 视图中不展示 `Todo:` / `Done:` 前缀，直接显示 checkbox 形态内容。
+14. todo 元数据（`list`、`milestone`、`goal`、`priority`、`due`、`schedule`、`tags`、`planHours`、`hoursLeft`）必须写在文件开头 frontmatter。
+15. 若旧 todo 文件缺少上述 frontmatter 字段，插件在读取时会自动补齐默认 properties 并写回文件。
+16. 视图默认只展示未完成项；已完成项不会在列表中显示。
+17. 可在面板里直接点击 checkbox 切换 `- [ ]` / `- [x]`，并写回原文件。
+18. 视图中不展示 `Todo:` / `Done:` 前缀，直接显示 checkbox 形态内容。
 
 ## 4) 常见问题
 

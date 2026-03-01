@@ -19,6 +19,12 @@ const DEFAULT_SETTINGS = {
   kanbanListOrder: ["Today"],
 };
 
+const PLANNING_HUB_COMMANDS = [
+  "Open Planning Hub",
+  "Open Milestone Kanban",
+  "Open Kanban Todo",
+];
+
 class GoalsDashboardPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
@@ -346,6 +352,10 @@ class GoalsDashboardPlugin extends Plugin {
       const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
       const metadata = parseKanbanTodoMetadata(frontmatter);
 
+      if (needsKanbanFrontmatterHydration(frontmatter)) {
+        await this.ensureKanbanTodoFrontmatter(file, metadata);
+      }
+
       todos.push({
         file,
         name: file.basename,
@@ -380,6 +390,50 @@ class GoalsDashboardPlugin extends Plugin {
       }
 
       return String(left.name).localeCompare(String(right.name));
+    });
+  }
+
+  async ensureKanbanTodoFrontmatter(file, metadata) {
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      if (!Object.prototype.hasOwnProperty.call(fm, "list")) {
+        fm.list = normalizeKanbanListName(metadata.list);
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(fm, "milestone")) {
+        fm.milestone = normalizeMilestone(metadata.milestone);
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(fm, "goal")) {
+        fm.goal = String(metadata.goal ?? "").trim();
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(fm, "priority")) {
+        fm.priority = normalizePriority(metadata.priority);
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(fm, "due")) {
+        fm.due = normalizeDateString(metadata.due);
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(fm, "schedule")) {
+        fm.schedule = String(metadata.schedule ?? "").trim();
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(fm, "tags")) {
+        fm.tags = normalizeTagList(metadata.tags);
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(fm, "planHours")) {
+        fm.planHours = Number.isFinite(metadata.planHours) ? metadata.planHours : 0;
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(fm, "hoursLeft")) {
+        fm.hoursLeft = Number.isFinite(metadata.hoursLeft)
+          ? metadata.hoursLeft
+          : Number.isFinite(metadata.planHours)
+            ? metadata.planHours
+            : 0;
+      }
     });
   }
 
@@ -1368,7 +1422,8 @@ class KanbanTodoDashboardView extends ItemView {
     const lanes = container.createDiv({ cls: "kanban-todo-lanes" });
     for (const listName of listsInView) {
       const listTodos = [...(todosByList.get(listName) || [])];
-      const openInList = listTodos.filter((todo) => !todo.done).length;
+      const visibleTodos = listTodos.filter((todo) => !todo.done);
+      const openInList = visibleTodos.length;
       const doneInList = listTodos.length - openInList;
 
       const listWrap = lanes.createDiv({ cls: "kanban-todo-list-wrap" });
@@ -1389,13 +1444,13 @@ class KanbanTodoDashboardView extends ItemView {
       });
 
       const list = listWrap.createDiv({ cls: "kanban-todo-checklist" });
-      if (listTodos.length === 0) {
+      if (visibleTodos.length === 0) {
         const empty = list.createDiv({ cls: "kanban-todo-empty" });
-        empty.createSpan({ text: "No todos in this list yet." });
+        empty.createSpan({ text: "No open todos in this list." });
         continue;
       }
 
-      for (const todo of listTodos) {
+      for (const todo of visibleTodos) {
         const row = list.createDiv({
           cls: `kanban-todo-row${todo.done ? " is-done" : ""}`,
         });
@@ -1564,6 +1619,14 @@ class GoalsDashboardSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }),
       );
+
+    const commandsEl = containerEl.createDiv({ cls: "planning-hub-command-list" });
+    commandsEl.createEl("h3", { text: "Commands" });
+    commandsEl.createEl("p", { text: "Current Planning Hub commands:" });
+    const listEl = commandsEl.createEl("ul");
+    for (const commandName of PLANNING_HUB_COMMANDS) {
+      listEl.createEl("li", { text: commandName });
+    }
   }
 }
 
@@ -2155,6 +2218,23 @@ function normalizeTagList(value) {
   }
 
   return normalized;
+}
+
+function needsKanbanFrontmatterHydration(frontmatter) {
+  const fm = frontmatter || {};
+  const requiredKeys = [
+    "list",
+    "milestone",
+    "goal",
+    "priority",
+    "due",
+    "schedule",
+    "tags",
+    "planHours",
+    "hoursLeft",
+  ];
+
+  return requiredKeys.some((key) => !Object.prototype.hasOwnProperty.call(fm, key));
 }
 
 function parseKanbanTodoMetadata(frontmatter) {
