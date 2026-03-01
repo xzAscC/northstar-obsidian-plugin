@@ -27,11 +27,148 @@
   color: var(--text-muted);
 }
 
-.goals-area-title {
-  margin: 16px 0 8px;
+.goals-board-section {
+  margin: 16px 0 20px;
 }
 
-.goals-area-grid {
+.goals-board-section[draggable="true"] {
+  cursor: grab;
+}
+
+.goals-board-section.is-dragging {
+  opacity: 0.55;
+}
+
+.goals-board-section.is-drop-target {
+  outline: 2px dashed color-mix(in srgb, var(--text-accent) 74%, transparent);
+  outline-offset: 4px;
+}
+
+.goals-board-header {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.goals-board-title {
+  margin: 0;
+}
+
+.goals-board-controls {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.goals-board-drag-hint {
+  background: color-mix(in srgb, var(--background-modifier-border) 72%, transparent);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 54px;
+  padding: 3px 8px;
+  text-align: center;
+}
+
+.goals-board-archive-btn {
+  border-radius: 8px;
+  min-width: 74px;
+  padding: 3px 10px;
+}
+
+.board-summary {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 3fr);
+  margin-bottom: 12px;
+}
+
+.board-summary-progress {
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, #0e7399 64%, var(--background-secondary) 36%),
+    color-mix(in srgb, #0a9c8b 62%, var(--background-secondary) 38%)
+  );
+  border-radius: 12px;
+  color: #f2fbff;
+  padding: 12px;
+}
+
+.board-summary-progress-label {
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+
+.board-summary-progress-bar {
+  appearance: none;
+  height: 16px;
+  width: 100%;
+}
+
+.board-summary-progress-bar::-webkit-progress-bar {
+  background-color: color-mix(in srgb, #ffffff 78%, transparent);
+  border-radius: 999px;
+}
+
+.board-summary-progress-bar::-webkit-progress-value {
+  background: linear-gradient(90deg, #0b7f89, #1dd29f);
+  border-radius: 999px;
+}
+
+.board-summary-status-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.board-summary-status {
+  border-radius: 12px;
+  color: #f4fbff;
+  padding: 10px 12px;
+}
+
+.board-summary-status-label {
+  font-size: 14px;
+}
+
+.board-summary-status-value {
+  font-size: 42px;
+  font-weight: 500;
+  line-height: 1;
+  margin-top: 4px;
+}
+
+.board-summary-status-on-track {
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, #4baac6 72%, var(--background-secondary) 28%),
+    color-mix(in srgb, #1a7a96 72%, var(--background-secondary) 28%)
+  );
+  border-left: 2px solid #67cd8f;
+}
+
+.board-summary-status-at-risk {
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, #57b8cb 70%, var(--background-secondary) 30%),
+    color-mix(in srgb, #0c8f8c 70%, var(--background-secondary) 30%)
+  );
+  border-left: 2px solid #f2bd4f;
+}
+
+.board-summary-status-miss {
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, #31a8ae 68%, var(--background-secondary) 32%),
+    color-mix(in srgb, #1e8b8b 68%, var(--background-secondary) 32%)
+  );
+  border-left: 2px solid #d44d62;
+}
+
+.goals-board-grid {
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
@@ -120,6 +257,11 @@
 }
 
 .goal-status-off-track {
+  background-color: color-mix(in srgb, #e76f51 28%, transparent);
+  color: #e76f51;
+}
+
+.goal-status-miss {
   background-color: color-mix(in srgb, #e76f51 28%, transparent);
   color: #e76f51;
 }
@@ -245,6 +387,18 @@
 }
 
 @media (max-width: 768px) {
+  .board-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .board-summary-status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .board-summary-status-value {
+    font-size: 32px;
+  }
+
   .goal-title-link {
     font-size: 17px;
   }

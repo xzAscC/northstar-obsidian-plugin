@@ -115,6 +115,7 @@ class GoalsDashboardPlugin extends Plugin {
         taskDue: frontmatter.taskDue ?? frontmatter.due ?? "",
         taskPercent: getTaskPercent(frontmatter),
         commentsCount: countComments(content),
+        archived: isTruthy(frontmatter.archived),
         boardArchived: isBoardArchived(frontmatter),
       });
     }
@@ -142,6 +143,16 @@ class GoalsDashboardPlugin extends Plugin {
       fm.current = Number.isFinite(currentValue) ? currentValue + delta : delta;
     });
   }
+
+  async archiveBoardGoals(goals) {
+    for (const goal of goals) {
+      await this.app.fileManager.processFrontMatter(goal.file, (fm) => {
+        fm.board = normalizeBoard(fm.board ?? fm.area ?? goal.board);
+        fm.boardArchived = true;
+        fm.boardStatus = "archived";
+      });
+    }
+  }
 }
 
 class GoalsDashboardView extends ItemView {
@@ -149,6 +160,7 @@ class GoalsDashboardView extends ItemView {
     super(leaf);
     this.plugin = plugin;
     this.refreshTimer = null;
+    this.draggingBoard = null;
   }
 
   getViewType() {
@@ -184,6 +196,8 @@ class GoalsDashboardView extends ItemView {
       window.clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
     }
+
+    this.draggingBoard = null;
   }
 
   queueRefresh() {
@@ -244,7 +258,7 @@ class GoalsDashboardView extends ItemView {
       const section = container.createDiv({ cls: "goals-board-section" });
       const boardHeader = section.createDiv({ cls: "goals-board-header" });
       boardHeader.createEl("h3", { cls: "goals-board-title", text: board });
-      this.createBoardOrderControls(boardHeader, board, visibleBoardNames);
+      this.createBoardHeaderActions(boardHeader, board, boardGoals, visibleBoardNames, section);
       createBoardSummary(section, boardGoals);
 
       const boardWrap = section.createDiv({ cls: "goals-board-grid" });
@@ -352,50 +366,112 @@ class GoalsDashboardView extends ItemView {
     }
   }
 
-  createBoardOrderControls(headerEl, board, boardOrder) {
-    const index = boardOrder.indexOf(board);
-    if (index === -1) {
-      return;
-    }
-
+  createBoardHeaderActions(headerEl, board, boardGoals, boardOrder, sectionEl) {
     const controls = headerEl.createDiv({ cls: "goals-board-controls" });
-    const upButton = controls.createEl("button", {
-      cls: "goals-board-order-btn",
-      text: "Up",
+    const dragHint = controls.createDiv({
+      cls: "goals-board-drag-hint",
+      text: "Drag",
     });
-    const downButton = controls.createEl("button", {
-      cls: "goals-board-order-btn",
-      text: "Down",
+    dragHint.ariaLabel = `Drag to reorder board ${board}`;
+    dragHint.title = "Drag board to reorder";
+
+    const archiveButton = controls.createEl("button", {
+      cls: "goals-board-archive-btn",
+      text: "Archive",
+    });
+    archiveButton.addEventListener("click", async () => {
+      await this.archiveBoard(board, boardGoals);
     });
 
-    upButton.disabled = index === 0;
-    downButton.disabled = index === boardOrder.length - 1;
+    this.enableBoardDragAndDrop(sectionEl, board, boardOrder);
+  }
 
-    upButton.addEventListener("click", async () => {
-      await this.moveBoard(board, -1, boardOrder);
+  enableBoardDragAndDrop(sectionEl, board, visibleBoardOrder) {
+    sectionEl.setAttribute("draggable", "true");
+    sectionEl.dataset.board = board;
+
+    sectionEl.addEventListener("dragstart", (event) => {
+      this.draggingBoard = board;
+      sectionEl.addClass("is-dragging");
+
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", board);
+      }
     });
 
-    downButton.addEventListener("click", async () => {
-      await this.moveBoard(board, 1, boardOrder);
+    sectionEl.addEventListener("dragend", () => {
+      this.draggingBoard = null;
+      this.clearDragClasses();
+    });
+
+    sectionEl.addEventListener("dragover", (event) => {
+      const sourceBoard = this.draggingBoard;
+      if (!sourceBoard || sourceBoard === board) {
+        return;
+      }
+
+      event.preventDefault();
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = "move";
+      }
+
+      sectionEl.addClass("is-drop-target");
+    });
+
+    sectionEl.addEventListener("dragleave", () => {
+      sectionEl.removeClass("is-drop-target");
+    });
+
+    sectionEl.addEventListener("drop", async (event) => {
+      event.preventDefault();
+      sectionEl.removeClass("is-drop-target");
+
+      const sourceBoard = this.draggingBoard || event.dataTransfer?.getData("text/plain");
+      if (!sourceBoard || sourceBoard === board) {
+        return;
+      }
+
+      const targetIndex = visibleBoardOrder.indexOf(board);
+      await this.moveBoardToIndex(sourceBoard, targetIndex, visibleBoardOrder);
     });
   }
 
-  async moveBoard(board, direction, visibleBoardOrder) {
+  async moveBoardToIndex(board, targetIndex, visibleBoardOrder) {
     const normalizedOrder = normalizeBoardOrder(this.plugin.settings.boardOrder, visibleBoardOrder);
-    const index = normalizedOrder.indexOf(board);
-    if (index === -1) {
+    const sourceIndex = normalizedOrder.indexOf(board);
+    if (sourceIndex === -1 || targetIndex < 0 || targetIndex >= normalizedOrder.length) {
       return;
     }
 
-    const target = index + direction;
-    if (target < 0 || target >= normalizedOrder.length) {
+    if (sourceIndex === targetIndex) {
       return;
     }
 
-    [normalizedOrder[index], normalizedOrder[target]] = [normalizedOrder[target], normalizedOrder[index]];
+    const [moved] = normalizedOrder.splice(sourceIndex, 1);
+    normalizedOrder.splice(targetIndex, 0, moved);
     this.plugin.settings.boardOrder = normalizedOrder;
     await this.plugin.saveSettings();
     await this.render();
+  }
+
+  clearDragClasses() {
+    const sections = this.containerEl.querySelectorAll(".goals-board-section");
+    for (const section of sections) {
+      section.removeClass("is-dragging");
+      section.removeClass("is-drop-target");
+    }
+  }
+
+  async archiveBoard(board, boardGoals) {
+    try {
+      await this.plugin.archiveBoardGoals(boardGoals);
+      new Notice(`Board archived: ${board}`);
+      await this.render();
+    } catch (error) {
+      console.error(error);
+      new Notice("Failed to archive board.");
+    }
   }
 
   async adjustCurrent(file, delta) {
@@ -548,7 +624,7 @@ function normalizeBoard(value) {
 }
 
 function isGoalArchived(goal) {
-  return isTruthy(goal.boardArchived) || normalizeStatus(goal.status) === "archived";
+  return isTruthy(goal.archived) || isTruthy(goal.boardArchived) || normalizeStatus(goal.status) === "archived";
 }
 
 function isBoardArchived(frontmatter) {
@@ -578,7 +654,7 @@ function shouldHideBoard(boardName, boardGoals) {
     return true;
   }
 
-  return boardGoals.some((goal) => isTruthy(goal.boardArchived));
+  return false;
 }
 
 function getOrderedBoardEntries(groupedBoards, persistedOrder) {

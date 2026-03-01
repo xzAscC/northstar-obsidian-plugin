@@ -18,7 +18,7 @@ tags:
 ```yaml
 ---
 type: goal
-area: Reading
+board: Reading
 metric: Papers
 start: 0
 current: 2
@@ -31,6 +31,8 @@ owner: xu
 task: 全年任务
 taskDue: 2027-01-01
 taskPercent: 0
+
+boardArchived: false
 ---
 ```
 
@@ -45,6 +47,7 @@ taskPercent: 0
 ## 2) 卡片字段说明
 
 - `Goal: <文件名>`：来自笔记文件名。
+- `board`：用于分组展示（兼容旧字段 `area`）。
 - `Metric`：优先读取 `metric`，没有时回退到 `unit`。
 - 进度条与 `% Complete`：由 `start/current/target` 自动计算。
 - `Status`：读取 `status`，如 `on-track` / `at-risk` / `off-track`。
@@ -63,11 +66,15 @@ taskTarget: 12
 
 1. 把目标笔记放到 `Goals/`（或在插件设置里改 `Goals folder`）。
 2. 在 Obsidian 启用插件后，点击左侧 `target` 图标或命令面板执行 `Open Goals Dashboard`（会在主工作区以标签页打开，不再固定到右侧边栏）。
-3. 在面板中使用 `+1 / -1` 快速调整 `current`，会直接写回 frontmatter。
-4. 编辑任意目标文件后，面板会自动刷新（也可点 `Refresh`）。
+3. 每个 board 顶部会显示总览（Progress、On Track、At Risk、Miss）。
+4. 可拖拽 board 区块手动调整显示顺序（会持久保存）。
+5. 可点击 board 标题右侧 `Archive` 按钮，一键归档整个 board（会把该 board 下目标写入 `boardArchived: true` 并隐藏）。
+6. 在面板中使用 `+1 / -1` 快速调整 `current`，会直接写回 frontmatter。
+7. 编辑任意目标文件后，面板会自动刷新（也可点 `Refresh`）。
 
 ## 4) 常见问题
 
 - 看不到卡片：检查 frontmatter 是否有 `type: goal`，且数值字段是数字。
+- 某个 board 不显示：检查是否配置了 `boardArchived: true`，或 board 名称是 `Archived`。
 - 进度异常：确认 `start/current/target` 都是可解析的数字。
 - 评论数为 0：确认使用二级标题 `## Comments`，并在下方使用 `-` 列表。
