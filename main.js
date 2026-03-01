@@ -1,5 +1,6 @@
 const {
   ItemView,
+  Modal,
   Notice,
   Plugin,
   PluginSettingTab,
@@ -96,11 +97,11 @@ class GoalsDashboardPlugin extends Plugin {
       const rawProgress = denominator === 0 ? (current >= target ? 1 : 0) : (current - start) / denominator;
       const clampedProgress = Math.max(0, Math.min(1, rawProgress));
       const percent = Math.round(clampedProgress * 100);
-      const content = await this.app.vault.cachedRead(file);
-
       goals.push({
         file,
         name: file.basename,
+        title: String(frontmatter.title ?? file.basename).trim() || file.basename,
+        titleColor: String(frontmatter.titleColor ?? frontmatter.color ?? "").trim(),
         board: normalizeBoard(frontmatter.board ?? frontmatter.area ?? "Uncategorized"),
         metric: frontmatter.metric ?? frontmatter.unit ?? "",
         start,
@@ -110,11 +111,6 @@ class GoalsDashboardPlugin extends Plugin {
         due: frontmatter.due ?? "",
         status: frontmatter.status ?? "on-track",
         percent,
-        ownerInitials: getOwnerInitials(frontmatter),
-        taskTitle: String(frontmatter.task ?? frontmatter.taskTitle ?? "Main Task"),
-        taskDue: frontmatter.taskDue ?? frontmatter.due ?? "",
-        taskPercent: getTaskPercent(frontmatter),
-        commentsCount: countComments(content),
         archived: isTruthy(frontmatter.archived),
         boardArchived: isBoardArchived(frontmatter),
       });
@@ -133,7 +129,7 @@ class GoalsDashboardPlugin extends Plugin {
         }
       }
 
-      return a.name.localeCompare(b.name);
+      return String(a.title).localeCompare(String(b.title));
     });
   }
 
@@ -152,6 +148,40 @@ class GoalsDashboardPlugin extends Plugin {
         fm.boardStatus = "archived";
       });
     }
+  }
+
+  async updateGoalFields(file, updates) {
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      for (const [key, value] of Object.entries(updates)) {
+        fm[key] = value;
+      }
+    });
+  }
+
+  async createGoalFile(payload) {
+    const name = String(payload.name ?? "").trim();
+    if (!name) {
+      throw new Error("missing-goal-name");
+    }
+
+    const goalsFolder = normalizeGoalsFolder(this.settings.goalsFolder);
+    await ensureFolderExists(this.app.vault, goalsFolder);
+
+    const targetValue = Number(payload.target ?? 1);
+    if (!Number.isFinite(targetValue) || targetValue <= 0) {
+      throw new Error("invalid-target");
+    }
+
+    const sanitizedBaseName = sanitizeFileName(name) || `goal-${Date.now()}`;
+    const filePath = getUniquePath(this.app.vault, goalsFolder, sanitizedBaseName);
+    const content = buildGoalTemplate({
+      board: normalizeBoard(payload.board),
+      metric: String(payload.metric ?? "").trim(),
+      due: String(payload.due ?? "").trim(),
+      target: targetValue,
+    });
+
+    return this.app.vault.create(filePath, content);
   }
 }
 
@@ -224,7 +254,23 @@ class GoalsDashboardView extends ItemView {
     const header = container.createDiv({ cls: "goals-dashboard-header" });
     header.createEl("h2", { text: "Goals Dashboard" });
 
-    const refreshButton = header.createEl("button", {
+    const headerActions = header.createDiv({ cls: "goals-dashboard-header-actions" });
+
+    const createButton = headerActions.createEl("button", {
+      cls: "goals-dashboard-create",
+    });
+    createButton.ariaLabel = "Create New Goal";
+    const createIcon = createButton.createSpan({ cls: "goals-dashboard-create-icon" });
+    setIcon(createIcon, "plus");
+    createButton.createSpan({
+      cls: "goals-dashboard-create-label",
+      text: "Create New Goal",
+    });
+    createButton.addEventListener("click", async () => {
+      await this.createGoalFromDashboard();
+    });
+
+    const refreshButton = headerActions.createEl("button", {
       cls: "goals-dashboard-refresh",
       text: "Refresh",
     });
@@ -266,28 +312,19 @@ class GoalsDashboardView extends ItemView {
         const card = boardWrap.createDiv({ cls: "goal-card" });
 
         const topRow = card.createDiv({ cls: "goal-top-row" });
-        const title = topRow.createEl("button", {
-          cls: "goal-title-link",
-          text: `Goal: ${goal.name}`,
+        const title = topRow.createEl("div", {
+          cls: "goal-title-text",
+          text: goal.title,
         });
-        title.addEventListener("click", async () => {
-          await this.openGoalInRightPane(goal.file);
-        });
+        setGoalTitleColor(title, goal.titleColor);
 
         const menuButton = topRow.createEl("button", {
           cls: "goal-menu-btn",
         });
-        menuButton.ariaLabel = `Open ${goal.name}`;
+        menuButton.ariaLabel = `Open ${goal.title}`;
         setIcon(menuButton, "more-vertical");
         menuButton.addEventListener("click", async () => {
           await this.openGoalInRightPane(goal.file);
-        });
-
-        const metric = card.createDiv({ cls: "goal-metric-row" });
-        metric.createSpan({ cls: "goal-label", text: "Metric:" });
-        metric.createSpan({
-          cls: "goal-metric-text",
-          text: goal.metric ? ` ${goal.metric}` : " -",
         });
 
         const progressText = card.createEl("div", {
@@ -302,50 +339,14 @@ class GoalsDashboardView extends ItemView {
         progress.max = 100;
         progress.value = goal.percent;
 
-        const stats = card.createDiv({ cls: "goal-stats" });
-        createStatItem(stats, "Start", goal.start);
-        createStatItem(stats, "Current", goal.current);
-        createStatItem(stats, "Goal", goal.target);
-
-        const statusRow = card.createDiv({ cls: "goal-status-row" });
-        const status = statusRow.createEl("button", {
-          cls: `goal-status goal-status-${normalizeStatus(goal.status)}`,
-          text: `${formatStatus(goal.status)} v`,
-        });
-        status.ariaLabel = `Status: ${goal.status}`;
-        status.addEventListener("click", async () => {
-          await this.openGoalInRightPane(goal.file);
-        });
-
-        const sideMeta = statusRow.createDiv({ cls: "goal-side-meta" });
-        const comments = sideMeta.createDiv({ cls: "goal-comments" });
-        const commentsIcon = comments.createSpan({ cls: "goal-comments-icon" });
-        setIcon(commentsIcon, "message-circle");
-        comments.createSpan({ text: String(goal.commentsCount) });
-
-        sideMeta.createEl("span", {
-          cls: "goal-owner-chip",
-          text: goal.ownerInitials,
-        });
-
-        const meta = card.createDiv({ cls: "goal-meta" });
-        const taskLink = meta.createEl("button", {
-          cls: "goal-task-link",
-          text: goal.taskTitle,
-        });
-        taskLink.addEventListener("click", async () => {
-          await this.openGoalInRightPane(goal.file);
-        });
-
-        const taskBottom = meta.createDiv({ cls: "goal-task-bottom" });
-        taskBottom.createEl("span", {
-          text: goal.taskDue ? `Due By: ${goal.taskDue}` : "Due By: -",
-        });
-        taskBottom.createEl("span", {
-          text: `${formatPercent(goal.taskPercent)} Complete`,
-        });
+        const quickEdit = card.createDiv({ cls: "goal-quick-edit" });
+        this.createQuickEditFields(quickEdit, goal);
 
         const actions = card.createDiv({ cls: "goal-actions" });
+        const minusTenBtn = actions.createEl("button", {
+          cls: "goal-action-btn",
+          text: "-10",
+        });
         const minusBtn = actions.createEl("button", {
           cls: "goal-action-btn",
           text: "-1",
@@ -354,13 +355,25 @@ class GoalsDashboardView extends ItemView {
           cls: "goal-action-btn",
           text: "+1",
         });
+        const plusTenBtn = actions.createEl("button", {
+          cls: "goal-action-btn",
+          text: "+10",
+        });
 
         minusBtn.addEventListener("click", async () => {
           await this.adjustCurrent(goal.file, -1);
         });
 
+        minusTenBtn.addEventListener("click", async () => {
+          await this.adjustCurrent(goal.file, -10);
+        });
+
         plusBtn.addEventListener("click", async () => {
           await this.adjustCurrent(goal.file, 1);
+        });
+
+        plusTenBtn.addEventListener("click", async () => {
+          await this.adjustCurrent(goal.file, 10);
         });
       }
     }
@@ -483,6 +496,215 @@ class GoalsDashboardView extends ItemView {
       new Notice("Failed to update current value.");
     }
   }
+
+  async createGoalFromDashboard() {
+    const defaultBoard = normalizeBoard(this.plugin.settings.boardOrder?.[0] ?? "Uncategorized");
+    const payload = await this.promptCreateGoal({ board: defaultBoard });
+    if (!payload) {
+      return;
+    }
+
+    try {
+      const file = await this.plugin.createGoalFile(payload);
+      new Notice(`Goal created: ${file.basename}`);
+      await this.render();
+      await this.openGoalInRightPane(file);
+    } catch (error) {
+      if (error && error.message === "missing-goal-name") {
+        new Notice("Please provide a goal name.");
+      } else if (error && error.message === "invalid-target") {
+        new Notice("Target must be a number greater than 0.");
+      } else {
+        console.error(error);
+        new Notice("Failed to create goal.");
+      }
+    }
+  }
+
+  async promptCreateGoal(defaults) {
+    return new Promise((resolve) => {
+      const modal = new CreateGoalModal(this.app, defaults, resolve);
+      modal.open();
+    });
+  }
+
+  createQuickEditFields(container, goal) {
+    const rowOne = container.createDiv({ cls: "goal-quick-edit-row" });
+    this.createQuickEditInput(rowOne, {
+      label: "Title",
+      value: goal.title,
+      placeholder: goal.name,
+      onCommit: async (value) => {
+        await this.saveGoalField(goal.file, "title", String(value || "").trim());
+      },
+    });
+
+    this.createQuickEditInput(rowOne, {
+      label: "Board",
+      value: goal.board,
+      placeholder: "Uncategorized",
+      onCommit: async (value) => {
+        const nextBoard = normalizeBoard(value);
+        await this.saveGoalField(goal.file, "board", nextBoard);
+      },
+    });
+
+    this.createQuickEditInput(rowOne, {
+      label: "Metric",
+      value: goal.metric,
+      placeholder: "Metric",
+      onCommit: async (value) => {
+        await this.saveGoalField(goal.file, "metric", String(value || "").trim());
+      },
+    });
+
+    this.createQuickEditInput(rowOne, {
+      label: "Title Color",
+      value: goal.titleColor || "",
+      placeholder: "#0b7160",
+      onCommit: async (value) => {
+        await this.saveGoalField(goal.file, "titleColor", normalizeHexColor(value));
+      },
+    });
+
+    const rowTwo = container.createDiv({ cls: "goal-quick-edit-row goal-quick-edit-row-numbers" });
+    this.createQuickEditInput(rowTwo, {
+      label: "Start",
+      value: String(goal.start),
+      type: "number",
+      onCommit: async (value) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) {
+          throw new Error("invalid-number");
+        }
+
+        await this.saveGoalField(goal.file, "start", parsed);
+      },
+    });
+
+    this.createQuickEditInput(rowTwo, {
+      label: "Current",
+      value: String(goal.current),
+      type: "number",
+      onCommit: async (value) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) {
+          throw new Error("invalid-number");
+        }
+
+        await this.saveGoalField(goal.file, "current", parsed);
+      },
+    });
+
+    this.createQuickEditInput(rowTwo, {
+      label: "Target",
+      value: String(goal.target),
+      type: "number",
+      onCommit: async (value) => {
+        const parsed = Number(value);
+        if (!Number.isFinite(parsed)) {
+          throw new Error("invalid-number");
+        }
+
+        await this.saveGoalField(goal.file, "target", parsed);
+      },
+    });
+
+    this.createQuickEditInput(rowTwo, {
+      label: "Due",
+      value: String(goal.due || ""),
+      placeholder: "YYYY-MM-DD",
+      onCommit: async (value) => {
+        await this.saveGoalField(goal.file, "due", String(value || "").trim());
+      },
+    });
+
+    const rowThree = container.createDiv({ cls: "goal-quick-edit-row" });
+    this.createQuickEditSelect(rowThree, {
+      label: "Status",
+      value: normalizeStatus(goal.status),
+      options: [
+        { value: "on-track", label: "On Track" },
+        { value: "at-risk", label: "At Risk" },
+        { value: "off-track", label: "Off Track" },
+      ],
+      onCommit: async (value) => {
+        await this.saveGoalField(goal.file, "status", value);
+      },
+    });
+  }
+
+  createQuickEditInput(container, config) {
+    const field = container.createDiv({ cls: "goal-quick-edit-field" });
+    field.createEl("label", {
+      cls: "goal-quick-edit-label",
+      text: config.label,
+    });
+
+    const input = field.createEl("input", {
+      cls: "goal-quick-edit-input",
+      type: config.type || "text",
+      value: String(config.value ?? ""),
+      placeholder: config.placeholder || "",
+    });
+
+    const commit = async () => {
+      await this.tryCommitQuickEdit(config.onCommit, input.value);
+    };
+
+    input.addEventListener("change", commit);
+    input.addEventListener("keydown", async (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+
+      event.preventDefault();
+      await commit();
+    });
+  }
+
+  createQuickEditSelect(container, config) {
+    const field = container.createDiv({ cls: "goal-quick-edit-field" });
+    field.createEl("label", {
+      cls: "goal-quick-edit-label",
+      text: config.label,
+    });
+
+    const select = field.createEl("select", {
+      cls: "goal-quick-edit-input",
+    });
+
+    for (const option of config.options) {
+      const optionEl = select.createEl("option", {
+        text: option.label,
+        value: option.value,
+      });
+      optionEl.selected = option.value === config.value;
+    }
+
+    select.addEventListener("change", async () => {
+      await this.tryCommitQuickEdit(config.onCommit, select.value);
+    });
+  }
+
+  async saveGoalField(file, key, value) {
+    await this.plugin.updateGoalFields(file, { [key]: value });
+  }
+
+  async tryCommitQuickEdit(commitFn, value) {
+    try {
+      await commitFn(value);
+      await this.render();
+    } catch (error) {
+      if (error && error.message === "invalid-number") {
+        new Notice("Please enter a valid number.");
+      } else {
+        console.error(error);
+        new Notice("Failed to update goal property.");
+      }
+      await this.render();
+    }
+  }
 }
 
 class GoalsDashboardSettingTab extends PluginSettingTab {
@@ -509,6 +731,118 @@ class GoalsDashboardSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           }),
       );
+  }
+}
+
+class CreateGoalModal extends Modal {
+  constructor(app, defaults, onSubmit) {
+    super(app);
+    this.defaults = defaults;
+    this.onSubmit = onSubmit;
+    this.submitted = false;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    this.titleEl.setText("Create New Goal");
+    contentEl.empty();
+    contentEl.addClass("goals-create-modal");
+
+    const form = contentEl.createEl("form", { cls: "goals-create-form" });
+
+    const nameInput = this.createInputField(form, {
+      label: "Goal Name",
+      placeholder: "Read 24 papers",
+      required: true,
+    });
+
+    const boardInput = this.createInputField(form, {
+      label: "Board",
+      value: this.defaults.board,
+      placeholder: "Uncategorized",
+    });
+
+    const metricInput = this.createInputField(form, {
+      label: "Metric",
+      placeholder: "Papers",
+    });
+
+    const targetInput = this.createInputField(form, {
+      label: "Target",
+      value: "1",
+      type: "number",
+      required: true,
+    });
+
+    const dueInput = this.createInputField(form, {
+      label: "Due",
+      type: "date",
+    });
+
+    const actions = form.createDiv({ cls: "goals-create-actions" });
+    const cancelButton = actions.createEl("button", {
+      type: "button",
+      text: "Cancel",
+    });
+    const createButton = actions.createEl("button", {
+      cls: "mod-cta",
+      type: "submit",
+      text: "Create",
+    });
+
+    cancelButton.addEventListener("click", () => {
+      this.close();
+    });
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+
+      this.submitted = true;
+      this.onSubmit({
+        name: nameInput.value,
+        board: boardInput.value,
+        metric: metricInput.value,
+        target: targetInput.value,
+        due: dueInput.value,
+      });
+      this.close();
+    });
+
+    window.setTimeout(() => {
+      nameInput.focus();
+      nameInput.select();
+    }, 0);
+
+    createButton.disabled = false;
+  }
+
+  onClose() {
+    if (!this.submitted) {
+      this.onSubmit(null);
+    }
+
+    this.contentEl.empty();
+  }
+
+  createInputField(container, config) {
+    const field = container.createDiv({ cls: "goals-create-field" });
+    field.createEl("label", {
+      cls: "goals-create-label",
+      text: config.label,
+    });
+
+    const input = field.createEl("input", {
+      cls: "goals-create-input",
+      type: config.type || "text",
+      value: String(config.value ?? ""),
+      placeholder: config.placeholder || "",
+    });
+
+    if (config.required) {
+      input.required = true;
+    }
+
+    return input;
   }
 }
 
@@ -541,77 +875,23 @@ function normalizeStatus(status) {
   return normalized;
 }
 
-function createStatItem(container, label, value) {
-  const item = container.createDiv({ cls: "goal-stat-item" });
-  item.createEl("span", { cls: "goal-label", text: `${label}:` });
-  item.createEl("span", { cls: "goal-stat-value", text: String(value) });
-}
-
-function formatStatus(status) {
-  const value = String(status || "on-track");
-  return value
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
-}
-
-function countComments(content) {
-  const lines = content.split(/\r?\n/);
-  const headingIndex = lines.findIndex((line) => /^##\s+comments\s*$/i.test(line.trim()));
-
-  if (headingIndex === -1) {
-    return 0;
+function setGoalTitleColor(element, value) {
+  const normalized = normalizeHexColor(value);
+  if (!normalized) {
+    element.style.removeProperty("color");
+    return;
   }
 
-  let count = 0;
-  for (let i = headingIndex + 1; i < lines.length; i += 1) {
-    const line = lines[i].trim();
-
-    if (/^##\s+/.test(line)) {
-      break;
-    }
-
-    if (/^[-*+]\s+/.test(line)) {
-      count += 1;
-    }
-  }
-
-  return count;
+  element.style.color = normalized;
 }
 
-function getOwnerInitials(frontmatter) {
-  const raw = String(frontmatter.owner ?? frontmatter.assignee ?? "").trim();
-  if (!raw) {
-    return "GO";
+function normalizeHexColor(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(normalized)) {
+    return normalized;
   }
 
-  const chunks = raw
-    .split(/[\s._-]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase());
-
-  return chunks.join("") || "GO";
-}
-
-function getTaskPercent(frontmatter) {
-  const explicitPercent = Number(frontmatter.taskPercent);
-  if (Number.isFinite(explicitPercent)) {
-    return clamp(explicitPercent, 0, 100);
-  }
-
-  const current = Number(frontmatter.taskCurrent ?? 0);
-  const target = Number(frontmatter.taskTarget ?? 0);
-  if (Number.isFinite(current) && Number.isFinite(target) && target > 0) {
-    return clamp((current / target) * 100, 0, 100);
-  }
-
-  return 0;
-}
-
-function formatPercent(value) {
-  return `${Number(value).toFixed(2)}%`;
+  return "";
 }
 
 function clamp(value, min, max) {
@@ -621,6 +901,85 @@ function clamp(value, min, max) {
 function normalizeBoard(value) {
   const board = String(value ?? "").trim();
   return board || "Uncategorized";
+}
+
+function normalizeGoalsFolder(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/^\/+|\/+$/g, "") || "Goals";
+}
+
+async function ensureFolderExists(vault, folderPath) {
+  if (!folderPath) {
+    return;
+  }
+
+  const parts = folderPath.split("/").filter(Boolean);
+  let current = "";
+
+  for (const part of parts) {
+    current = current ? `${current}/${part}` : part;
+    const existing = vault.getAbstractFileByPath(current);
+    if (!existing) {
+      await vault.createFolder(current);
+    }
+  }
+}
+
+function sanitizeFileName(name) {
+  return String(name)
+    .trim()
+    .replace(/[\\/:*?"<>|#^[\]]+/g, "-")
+    .replace(/\s+/g, " ")
+    .replace(/^\.+|\.+$/g, "")
+    .trim();
+}
+
+function getUniquePath(vault, folder, baseName) {
+  const normalizedFolder = normalizeGoalsFolder(folder);
+  let suffix = 0;
+
+  while (true) {
+    const fileName = suffix === 0 ? `${baseName}.md` : `${baseName}-${suffix}.md`;
+    const candidate = `${normalizedFolder}/${fileName}`;
+    if (!vault.getAbstractFileByPath(candidate)) {
+      return candidate;
+    }
+    suffix += 1;
+  }
+}
+
+function buildGoalTemplate(values) {
+  const lines = [
+    "---",
+    "type: goal",
+    `board: ${toYamlString(normalizeBoard(values.board))}`,
+    `metric: ${toYamlString(values.metric)}`,
+    "start: 0",
+    "current: 0",
+    `target: ${Number(values.target) || 1}`,
+    'unit: ""',
+    `due: ${toYamlString(values.due)}`,
+    "status: on-track",
+    'owner: ""',
+    'task: "Main Task"',
+    'taskDue: ""',
+    "taskPercent: 0",
+    "boardArchived: false",
+    "---",
+    "",
+    "## Comments",
+    "",
+  ];
+
+  return lines.join("\n");
+}
+
+function toYamlString(value) {
+  const escaped = String(value ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"');
+  return `"${escaped}"`;
 }
 
 function isGoalArchived(goal) {

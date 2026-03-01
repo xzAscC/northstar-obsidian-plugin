@@ -69,8 +69,10 @@ taskTarget: 12
 3. 每个 board 顶部会显示总览（Progress、On Track、At Risk、Miss）。
 4. 可拖拽 board 区块手动调整显示顺序（会持久保存）。
 5. 可点击 board 标题右侧 `Archive` 按钮，一键归档整个 board（会把该 board 下目标写入 `boardArchived: true` 并隐藏）。
-6. 在面板中使用 `+1 / -1` 快速调整 `current`，会直接写回 frontmatter。
-7. 编辑任意目标文件后，面板会自动刷新（也可点 `Refresh`）。
+6. 在面板中使用 `+1 / -1 / +10 / -10` 快速调整 `current`，会直接写回 frontmatter。
+7. 每张卡片可直接修改基础字段（`title`、`board`、`metric`、`start/current/target`、`due`、`status`），无需打开原始 Markdown。
+8. 在 dashboard 顶部点击 `Create New Goal` 可直接新建目标文件（填写名称、board、metric、target、due）。
+9. 编辑任意目标文件后，面板会自动刷新（也可点 `Refresh`）。
 
 ## 4) 常见问题
 
