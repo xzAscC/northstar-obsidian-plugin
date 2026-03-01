@@ -1,0 +1,73 @@
+---
+tags:
+  - ops/plugin/obsidian
+  - content/guide
+  - area/tech-notes/opencode
+---
+
+# Goals Dashboard（Leantime 风格 Goal Board）
+
+相关链接：[[tech-notes/obsidian-goals-plugin-implementation-plan]] [[tech-notes/README]]
+
+这个插件会扫描 `Goals/` 下 `type: goal` 的笔记，并渲染成类似 Leantime 的 Goal 卡片板。
+
+## 1) 目标文件格式
+
+每个目标一个 Markdown 文件，建议放在 `Goals/` 目录。
+
+```yaml
+---
+type: goal
+area: Reading
+metric: Papers
+start: 0
+current: 2
+target: 30
+unit: papers
+due: 2026-12-31
+status: on-track
+
+owner: xu
+task: 全年任务
+taskDue: 2027-01-01
+taskPercent: 0
+---
+```
+
+正文里可选加评论段，插件会自动统计列表条数：
+
+```md
+## Comments
+- comment 1
+- comment 2
+```
+
+## 2) 卡片字段说明
+
+- `Goal: <文件名>`：来自笔记文件名。
+- `Metric`：优先读取 `metric`，没有时回退到 `unit`。
+- 进度条与 `% Complete`：由 `start/current/target` 自动计算。
+- `Status`：读取 `status`，如 `on-track` / `at-risk` / `off-track`。
+- 评论数：统计 `## Comments` 下的无序列表项。
+- 右侧圆形头像：读取 `owner` 或 `assignee` 的首字母。
+- 底部任务条：`task`、`taskDue`、`taskPercent`。
+
+`taskPercent` 也可不写，改用这组字段自动算：
+
+```yaml
+taskCurrent: 3
+taskTarget: 12
+```
+
+## 3) 如何开启和使用
+
+1. 把目标笔记放到 `Goals/`（或在插件设置里改 `Goals folder`）。
+2. 在 Obsidian 启用插件后，点击左侧 `target` 图标或命令面板执行 `Open Goals Dashboard`（会在主工作区以标签页打开，不再固定到右侧边栏）。
+3. 在面板中使用 `+1 / -1` 快速调整 `current`，会直接写回 frontmatter。
+4. 编辑任意目标文件后，面板会自动刷新（也可点 `Refresh`）。
+
+## 4) 常见问题
+
+- 看不到卡片：检查 frontmatter 是否有 `type: goal`，且数值字段是数字。
+- 进度异常：确认 `start/current/target` 都是可解析的数字。
+- 评论数为 0：确认使用二级标题 `## Comments`，并在下方使用 `-` 列表。

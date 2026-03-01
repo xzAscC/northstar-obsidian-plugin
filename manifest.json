@@ -1,0 +1,9 @@
+{
+  "id": "goals-dashboard",
+  "name": "Goals Dashboard",
+  "version": "0.2.0",
+  "minAppVersion": "1.4.0",
+  "description": "Leantime-style goal board with metric/task sections and quick +/- updates.",
+  "author": "xzascc",
+  "isDesktopOnly": false
+}
