@@ -223,14 +223,22 @@
   margin-bottom: 8px;
 }
 
-.goal-title-text {
+.goal-title-input {
+  background: transparent;
+  border: 0;
   color: var(--text-normal);
+  flex: 1;
   font-size: 20px;
   font-weight: 700;
   line-height: 1.2;
+  min-width: 0;
+  outline: none;
   padding: 0;
-  text-wrap: balance;
   text-align: left;
+}
+
+.goal-title-input:focus {
+  border-bottom: 1px solid color-mix(in srgb, var(--text-accent) 58%, transparent);
 }
 
 .goal-menu-btn {
@@ -408,7 +416,7 @@
     font-size: 32px;
   }
 
-  .goal-title-text {
+  .goal-title-input {
     font-size: 17px;
   }
 

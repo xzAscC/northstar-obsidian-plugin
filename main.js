@@ -101,7 +101,6 @@ class GoalsDashboardPlugin extends Plugin {
         file,
         name: file.basename,
         title: String(frontmatter.title ?? file.basename).trim() || file.basename,
-        titleColor: String(frontmatter.titleColor ?? frontmatter.color ?? "").trim(),
         board: normalizeBoard(frontmatter.board ?? frontmatter.area ?? "Uncategorized"),
         metric: frontmatter.metric ?? frontmatter.unit ?? "",
         start,
@@ -277,6 +276,8 @@ class GoalsDashboardView extends ItemView {
     refreshButton.addEventListener("click", () => this.render());
 
     const goals = await this.plugin.getGoals();
+    const boardOptions = getUniqueGoalValues(goals, "board");
+    const metricOptions = getUniqueGoalValues(goals, "metric");
 
     if (goals.length === 0) {
       container.createEl("p", {
@@ -312,11 +313,29 @@ class GoalsDashboardView extends ItemView {
         const card = boardWrap.createDiv({ cls: "goal-card" });
 
         const topRow = card.createDiv({ cls: "goal-top-row" });
-        const title = topRow.createEl("div", {
-          cls: "goal-title-text",
-          text: goal.title,
+        const titleInput = topRow.createEl("input", {
+          cls: "goal-title-input",
+          type: "text",
+          value: goal.title,
+          placeholder: goal.name,
         });
-        setGoalTitleColor(title, goal.titleColor);
+
+        const commitTitle = async () => {
+          await this.tryCommitQuickEdit(async (value) => {
+            await this.saveGoalField(goal.file, "title", String(value || "").trim());
+          }, titleInput.value);
+        };
+
+        titleInput.addEventListener("change", commitTitle);
+        titleInput.addEventListener("keydown", async (event) => {
+          if (event.key !== "Enter") {
+            return;
+          }
+
+          event.preventDefault();
+          await commitTitle();
+          titleInput.blur();
+        });
 
         const menuButton = topRow.createEl("button", {
           cls: "goal-menu-btn",
@@ -340,7 +359,10 @@ class GoalsDashboardView extends ItemView {
         progress.value = goal.percent;
 
         const quickEdit = card.createDiv({ cls: "goal-quick-edit" });
-        this.createQuickEditFields(quickEdit, goal);
+        this.createQuickEditFields(quickEdit, goal, {
+          boardOptions,
+          metricOptions,
+        });
 
         const actions = card.createDiv({ cls: "goal-actions" });
         const minusTenBtn = actions.createEl("button", {
@@ -498,8 +520,17 @@ class GoalsDashboardView extends ItemView {
   }
 
   async createGoalFromDashboard() {
-    const defaultBoard = normalizeBoard(this.plugin.settings.boardOrder?.[0] ?? "Uncategorized");
-    const payload = await this.promptCreateGoal({ board: defaultBoard });
+    const goals = await this.plugin.getGoals();
+    const boardOptions = getUniqueGoalValues(goals, "board");
+    const metricOptions = getUniqueGoalValues(goals, "metric");
+    const defaultBoard = normalizeBoard(
+      this.plugin.settings.boardOrder?.[0] ?? boardOptions[0] ?? "Uncategorized",
+    );
+    const payload = await this.promptCreateGoal({
+      board: defaultBoard,
+      boardOptions,
+      metricOptions,
+    });
     if (!payload) {
       return;
     }
@@ -528,42 +559,26 @@ class GoalsDashboardView extends ItemView {
     });
   }
 
-  createQuickEditFields(container, goal) {
+  createQuickEditFields(container, goal, valueOptions = {}) {
     const rowOne = container.createDiv({ cls: "goal-quick-edit-row" });
-    this.createQuickEditInput(rowOne, {
-      label: "Title",
-      value: goal.title,
-      placeholder: goal.name,
-      onCommit: async (value) => {
-        await this.saveGoalField(goal.file, "title", String(value || "").trim());
-      },
-    });
-
-    this.createQuickEditInput(rowOne, {
+    this.createQuickEditInputWithSuggestions(rowOne, {
       label: "Board",
       value: goal.board,
       placeholder: "Uncategorized",
+      suggestions: valueOptions.boardOptions,
       onCommit: async (value) => {
         const nextBoard = normalizeBoard(value);
         await this.saveGoalField(goal.file, "board", nextBoard);
       },
     });
 
-    this.createQuickEditInput(rowOne, {
+    this.createQuickEditInputWithSuggestions(rowOne, {
       label: "Metric",
       value: goal.metric,
       placeholder: "Metric",
+      suggestions: valueOptions.metricOptions,
       onCommit: async (value) => {
         await this.saveGoalField(goal.file, "metric", String(value || "").trim());
-      },
-    });
-
-    this.createQuickEditInput(rowOne, {
-      label: "Title Color",
-      value: goal.titleColor || "",
-      placeholder: "#0b7160",
-      onCommit: async (value) => {
-        await this.saveGoalField(goal.file, "titleColor", normalizeHexColor(value));
       },
     });
 
@@ -647,6 +662,38 @@ class GoalsDashboardView extends ItemView {
       value: String(config.value ?? ""),
       placeholder: config.placeholder || "",
     });
+
+    const commit = async () => {
+      await this.tryCommitQuickEdit(config.onCommit, input.value);
+    };
+
+    input.addEventListener("change", commit);
+    input.addEventListener("keydown", async (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+
+      event.preventDefault();
+      await commit();
+    });
+  }
+
+  createQuickEditInputWithSuggestions(container, config) {
+    const field = container.createDiv({ cls: "goal-quick-edit-field" });
+    field.createEl("label", {
+      cls: "goal-quick-edit-label",
+      text: config.label,
+    });
+
+    const input = field.createEl("input", {
+      cls: "goal-quick-edit-input",
+      type: config.type || "text",
+      value: String(config.value ?? ""),
+      placeholder: config.placeholder || "",
+    });
+
+    const datalistId = createDatalistId(config.label);
+    attachSuggestions(field, input, datalistId, config.suggestions);
 
     const commit = async () => {
       await this.tryCommitQuickEdit(config.onCommit, input.value);
@@ -756,15 +803,17 @@ class CreateGoalModal extends Modal {
       required: true,
     });
 
-    const boardInput = this.createInputField(form, {
+    const boardInput = this.createInputFieldWithSuggestions(form, {
       label: "Board",
       value: this.defaults.board,
       placeholder: "Uncategorized",
+      suggestions: this.defaults.boardOptions,
     });
 
-    const metricInput = this.createInputField(form, {
+    const metricInput = this.createInputFieldWithSuggestions(form, {
       label: "Metric",
       placeholder: "Papers",
+      suggestions: this.defaults.metricOptions,
     });
 
     const targetInput = this.createInputField(form, {
@@ -844,6 +893,30 @@ class CreateGoalModal extends Modal {
 
     return input;
   }
+
+  createInputFieldWithSuggestions(container, config) {
+    const field = container.createDiv({ cls: "goals-create-field" });
+    field.createEl("label", {
+      cls: "goals-create-label",
+      text: config.label,
+    });
+
+    const input = field.createEl("input", {
+      cls: "goals-create-input",
+      type: config.type || "text",
+      value: String(config.value ?? ""),
+      placeholder: config.placeholder || "",
+    });
+
+    if (config.required) {
+      input.required = true;
+    }
+
+    const datalistId = createDatalistId(config.label);
+    attachSuggestions(field, input, datalistId, config.suggestions);
+
+    return input;
+  }
 }
 
 function groupBy(items, getKey) {
@@ -856,6 +929,54 @@ function groupBy(items, getKey) {
     map.get(key).push(item);
   }
   return map;
+}
+
+let datalistCounter = 0;
+
+function createDatalistId(label) {
+  datalistCounter += 1;
+  const normalized = String(label ?? "field")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "");
+  return `goals-datalist-${normalized || "field"}-${datalistCounter}`;
+}
+
+function attachSuggestions(fieldEl, inputEl, datalistId, suggestions) {
+  const normalizedSuggestions = Array.isArray(suggestions)
+    ? suggestions
+      .map((value) => String(value ?? "").trim())
+      .filter(Boolean)
+    : [];
+
+  if (normalizedSuggestions.length === 0) {
+    return;
+  }
+
+  inputEl.setAttribute("list", datalistId);
+  const datalist = fieldEl.createEl("datalist");
+  datalist.id = datalistId;
+
+  for (const suggestion of normalizedSuggestions) {
+    datalist.createEl("option", { value: suggestion });
+  }
+}
+
+function getUniqueGoalValues(goals, key) {
+  const values = [];
+  for (const goal of goals) {
+    const rawValue = String(goal?.[key] ?? "").trim();
+    if (!rawValue) {
+      continue;
+    }
+
+    if (!values.includes(rawValue)) {
+      values.push(rawValue);
+    }
+  }
+
+  return values.sort((left, right) => left.localeCompare(right));
 }
 
 function isSidebarLeaf(workspace, leaf) {
@@ -873,25 +994,6 @@ function normalizeStatus(status) {
     return "miss";
   }
   return normalized;
-}
-
-function setGoalTitleColor(element, value) {
-  const normalized = normalizeHexColor(value);
-  if (!normalized) {
-    element.style.removeProperty("color");
-    return;
-  }
-
-  element.style.color = normalized;
-}
-
-function normalizeHexColor(value) {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  if (/^#[0-9a-f]{6}$/.test(normalized)) {
-    return normalized;
-  }
-
-  return "";
 }
 
 function clamp(value, min, max) {
