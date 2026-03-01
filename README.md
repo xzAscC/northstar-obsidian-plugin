@@ -10,7 +10,10 @@ tags:
 相关链接：[[tech-notes/obsidian-goals-plugin-implementation-plan]] [[tech-notes/README]]
 
 这个插件会扫描 `Goals/` 下 `type: goal` 的笔记，并渲染成类似 Leantime 的 Goal 卡片板。
-同时提供一个 Milestones 页面，用于集中查看某个里程碑下包含的 goal 与 markdown todo。
+同时提供：
+
+- `Milestone Kanban`：集中查看某个里程碑下包含的 goal 与 markdown todo。
+- `Kanban Todo`：读取 `Kanban/` 目录中的 todo 文件（每个 todo 一个 `.md` 文件），直接在 Planning Hub 里查看未完成待办。
 
 ## 1) 目标文件格式
 
@@ -75,7 +78,10 @@ milestoneTarget: 12
 8. 在 dashboard 顶部点击 `Create New Goal` 可直接新建目标文件（填写名称、board、metric、target、due）。
 9. 编辑任意目标文件后，面板会自动刷新（也可点 `Refresh`）。
 10. 点击右上角 `Milestone Kanban`（或命令 `Open Milestone Kanban`）可打开里程碑看板，按 milestone 聚合 goal 与 todo。
-11. 看板采用自适应列布局，优先上下滚动，避免横向滚动。
+11. 点击 `Kanban Todo`（或命令 `Open Kanban Todo`）可打开 Kanban 任务视图，按「一个文件一个 todo」展示。
+12. 每个 todo 文件正文建议使用单行 checkbox：`- [ ] 任务内容`。
+13. 已完成项（`- [x]`）会自动隐藏，不在视图中显示。
+14. 视图中不再展示 `Todo:` / `Done:` 前缀，直接显示 checkbox 形态内容。
 
 ## 4) 常见问题
 

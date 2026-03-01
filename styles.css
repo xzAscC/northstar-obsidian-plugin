@@ -594,6 +594,83 @@
   text-decoration: line-through;
 }
 
+.kanban-todo-dashboard-view {
+  height: calc(100vh - 120px);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.kanban-todo-board-list {
+  display: grid;
+  gap: 12px;
+}
+
+.kanban-todo-board-card {
+  background: color-mix(in srgb, var(--background-secondary) 86%, #d8ecf2 14%);
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 72%, #76aebe 28%);
+  border-radius: 14px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.kanban-todo-board-top {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.kanban-todo-board-open {
+  background: transparent;
+  border: 0;
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 700;
+  padding: 0;
+  text-align: left;
+}
+
+.kanban-todo-board-open:hover {
+  color: var(--text-accent);
+  text-decoration: underline;
+}
+
+.kanban-todo-board-stats {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.kanban-todo-lane-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.kanban-todo-lane-card {
+  background: color-mix(in srgb, var(--background-primary) 90%, #6ea5b5 10%);
+  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, #7eb6c4 30%);
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  min-height: 160px;
+  padding: 10px;
+}
+
+.kanban-todo-lane-top {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.kanban-todo-lane-title {
+  margin: 0;
+}
+
 @media (max-width: 768px) {
   .board-summary {
     grid-template-columns: 1fr;
@@ -622,6 +699,10 @@
   }
 
   .milestone-card-body {
+    grid-template-columns: 1fr;
+  }
+
+  .kanban-todo-lane-grid {
     grid-template-columns: 1fr;
   }
 }

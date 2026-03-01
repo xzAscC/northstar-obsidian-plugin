@@ -10,9 +10,11 @@ const {
 
 const VIEW_TYPE_GOALS_DASHBOARD = "goals-dashboard-view";
 const VIEW_TYPE_MILESTONE_DASHBOARD = "goals-milestone-view";
+const VIEW_TYPE_KANBAN_TODO_DASHBOARD = "goals-kanban-todo-view";
 
 const DEFAULT_SETTINGS = {
   goalsFolder: "Goals",
+  kanbanFolder: "Kanban",
   boardOrder: [],
 };
 
@@ -28,6 +30,11 @@ class GoalsDashboardPlugin extends Plugin {
     this.registerView(
       VIEW_TYPE_MILESTONE_DASHBOARD,
       (leaf) => new MilestoneDashboardView(leaf, this),
+    );
+
+    this.registerView(
+      VIEW_TYPE_KANBAN_TODO_DASHBOARD,
+      (leaf) => new KanbanTodoDashboardView(leaf, this),
     );
 
     this.addRibbonIcon("target", "Open Planning Hub", () => {
@@ -50,12 +57,23 @@ class GoalsDashboardPlugin extends Plugin {
       callback: () => this.activateMilestoneView(),
     });
 
+    this.addRibbonIcon("columns-3", "Open Kanban Todo", () => {
+      this.activateKanbanTodoView();
+    });
+
+    this.addCommand({
+      id: "open-kanban-todo-dashboard",
+      name: "Open Kanban Todo",
+      callback: () => this.activateKanbanTodoView(),
+    });
+
     this.addSettingTab(new GoalsDashboardSettingTab(this.app, this));
   }
 
   onunload() {
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_GOALS_DASHBOARD);
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_MILESTONE_DASHBOARD);
+    this.app.workspace.detachLeavesOfType(VIEW_TYPE_KANBAN_TODO_DASHBOARD);
   }
 
   async activateView() {
@@ -90,11 +108,30 @@ class GoalsDashboardPlugin extends Plugin {
     workspace.revealLeaf(leaf);
   }
 
+  async activateKanbanTodoView() {
+    const { workspace } = this.app;
+    const existingLeaves = workspace.getLeavesOfType(VIEW_TYPE_KANBAN_TODO_DASHBOARD);
+    let leaf = existingLeaves.find((candidate) => !isSidebarLeaf(workspace, candidate));
+
+    if (!leaf) {
+      leaf = workspace.getLeaf(true);
+      await leaf.setViewState({
+        type: VIEW_TYPE_KANBAN_TODO_DASHBOARD,
+        active: true,
+      });
+    }
+
+    workspace.revealLeaf(leaf);
+  }
+
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     if (!Array.isArray(this.settings.boardOrder)) {
       this.settings.boardOrder = [];
     }
+
+    this.settings.goalsFolder = normalizeFolderPath(this.settings.goalsFolder, DEFAULT_SETTINGS.goalsFolder);
+    this.settings.kanbanFolder = normalizeFolderPath(this.settings.kanbanFolder, DEFAULT_SETTINGS.kanbanFolder);
   }
 
   async saveSettings() {
@@ -221,6 +258,50 @@ class GoalsDashboardPlugin extends Plugin {
   async getGoalTodos(file) {
     const raw = await this.app.vault.cachedRead(file);
     return extractTodoItems(raw);
+  }
+
+  async getKanbanBoards() {
+    const allFiles = this.app.vault.getMarkdownFiles();
+    const boards = [];
+    const base = normalizeFolderPath(this.settings.kanbanFolder, "");
+    const folderPrefix = base ? `${base}/` : "";
+
+    for (const file of allFiles) {
+      if (base) {
+        const inFolder = file.path === base || file.path.startsWith(folderPrefix);
+        if (!inFolder) {
+          continue;
+        }
+      }
+
+      const raw = await this.app.vault.cachedRead(file);
+      const todo = parseSingleTodoFile(raw);
+      if (!todo || todo.done) {
+        continue;
+      }
+
+      boards.push({
+        file,
+        name: file.basename,
+        lanes: [
+          {
+            name: "Todo",
+            cards: [
+              {
+                done: false,
+                text: todo.text,
+              },
+            ],
+            openCount: 1,
+            doneCount: 0,
+          },
+        ],
+        openCount: 1,
+        doneCount: 0,
+      });
+    }
+
+    return boards.sort((left, right) => String(left.name).localeCompare(String(right.name)));
   }
 
   async getMilestones() {
@@ -385,6 +466,14 @@ class GoalsDashboardView extends ItemView {
     });
     milestoneButton.addEventListener("click", async () => {
       await this.plugin.activateMilestoneView();
+    });
+
+    const kanbanButton = headerActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "Kanban Todo",
+    });
+    kanbanButton.addEventListener("click", async () => {
+      await this.plugin.activateKanbanTodoView();
     });
 
     const goals = await this.plugin.getGoals();
@@ -948,6 +1037,14 @@ class MilestoneDashboardView extends ItemView {
     });
     refreshButton.addEventListener("click", () => this.render());
 
+    const kanbanButton = headerActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "Kanban Todo",
+    });
+    kanbanButton.addEventListener("click", async () => {
+      await this.plugin.activateKanbanTodoView();
+    });
+
     const milestones = await this.plugin.getMilestones();
     if (milestones.length === 0) {
       container.createEl("p", {
@@ -973,10 +1070,6 @@ class MilestoneDashboardView extends ItemView {
       });
       stats.createEl("span", {
         cls: "milestone-stat-chip",
-        text: `Todo ${milestone.todoOpen + milestone.todoDone}`,
-      });
-      stats.createEl("span", {
-        cls: "milestone-stat-chip",
         text: `Open ${milestone.todoOpen}`,
       });
 
@@ -999,20 +1092,21 @@ class MilestoneDashboardView extends ItemView {
         });
       }
 
-      if (milestone.todos.length === 0) {
+      const openTodos = milestone.todos.filter((todo) => !todo.done);
+      if (openTodos.length === 0) {
         card.createEl("p", {
           cls: "milestone-todo-empty",
-          text: "No markdown todos in linked goals.",
+          text: "No open markdown todos in linked goals.",
         });
       } else {
         const todoList = card.createDiv({ cls: "milestone-todo-list" });
-        for (const todo of milestone.todos) {
+        for (const todo of openTodos) {
           const todoItem = todoList.createDiv({
-            cls: todo.done ? "milestone-todo-item is-done" : "milestone-todo-item",
+            cls: "milestone-todo-item",
           });
           todoItem.createSpan({
             cls: "milestone-todo-text",
-            text: `${todo.done ? "Done" : "Todo"}: ${todo.text}`,
+            text: `[ ] ${todo.text}`,
           });
           const openGoalButton = todoItem.createEl("button", {
             cls: "milestone-todo-goal-link",
@@ -1020,6 +1114,177 @@ class MilestoneDashboardView extends ItemView {
           });
           openGoalButton.addEventListener("click", async () => {
             await this.openGoalInRightPane(todo.goalFile);
+          });
+        }
+      }
+    }
+  }
+}
+
+class KanbanTodoDashboardView extends ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.refreshTimer = null;
+  }
+
+  getViewType() {
+    return VIEW_TYPE_KANBAN_TODO_DASHBOARD;
+  }
+
+  getDisplayText() {
+    return "Kanban Todo";
+  }
+
+  getIcon() {
+    return "columns-3";
+  }
+
+  async onOpen() {
+    this.registerEvent(
+      this.app.metadataCache.on("changed", () => {
+        this.queueRefresh();
+      }),
+    );
+
+    this.registerEvent(
+      this.app.vault.on("modify", () => {
+        this.queueRefresh();
+      }),
+    );
+
+    await this.render();
+  }
+
+  async onClose() {
+    if (this.refreshTimer) {
+      window.clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+  }
+
+  queueRefresh() {
+    if (this.refreshTimer) {
+      window.clearTimeout(this.refreshTimer);
+    }
+
+    this.refreshTimer = window.setTimeout(() => {
+      this.render();
+    }, 150);
+  }
+
+  async openBoardInRightPane(file) {
+    const leaf = this.app.workspace.getLeaf("split");
+    await leaf.openFile(file, { active: true });
+    this.app.workspace.revealLeaf(leaf);
+  }
+
+  async render() {
+    const container = this.containerEl.children[1];
+    container.empty();
+    container.addClass("goals-dashboard-view");
+    container.addClass("kanban-todo-dashboard-view");
+
+    const header = container.createDiv({ cls: "goals-dashboard-header" });
+    header.createEl("h2", { text: "Kanban Todo" });
+
+    const headerActions = header.createDiv({ cls: "goals-dashboard-header-actions" });
+    const goalsButton = headerActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "Goals",
+    });
+    goalsButton.addEventListener("click", async () => {
+      await this.plugin.activateView();
+    });
+
+    const milestoneButton = headerActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "Milestone Kanban",
+    });
+    milestoneButton.addEventListener("click", async () => {
+      await this.plugin.activateMilestoneView();
+    });
+
+    const refreshButton = headerActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "Refresh",
+    });
+    refreshButton.addEventListener("click", () => this.render());
+
+    const boards = await this.plugin.getKanbanBoards();
+    if (boards.length === 0) {
+      container.createEl("p", {
+        cls: "goals-dashboard-empty",
+        text: `No kanban boards found in ${this.plugin.settings.kanbanFolder || "configured folder"}.`,
+      });
+      return;
+    }
+
+    const boardList = container.createDiv({ cls: "kanban-todo-board-list" });
+    for (const board of boards) {
+      const boardCard = boardList.createDiv({ cls: "kanban-todo-board-card" });
+      const boardTop = boardCard.createDiv({ cls: "kanban-todo-board-top" });
+      const boardOpenButton = boardTop.createEl("button", {
+        cls: "kanban-todo-board-open",
+        text: board.name,
+      });
+      boardOpenButton.addEventListener("click", async () => {
+        await this.openBoardInRightPane(board.file);
+      });
+
+      const boardStats = boardTop.createDiv({ cls: "kanban-todo-board-stats" });
+      boardStats.createEl("span", {
+        cls: "milestone-stat-chip",
+        text: `Open ${board.openCount}`,
+      });
+      boardStats.createEl("span", {
+        cls: "milestone-stat-chip",
+        text: `Done ${board.doneCount}`,
+      });
+      boardStats.createEl("span", {
+        cls: "milestone-stat-chip",
+        text: `Total ${board.openCount + board.doneCount}`,
+      });
+
+      if (board.lanes.length === 0) {
+        boardCard.createEl("p", {
+          cls: "milestone-todo-empty",
+          text: "No todo cards in this board.",
+        });
+        continue;
+      }
+
+      const lanes = boardCard.createDiv({ cls: "kanban-todo-lane-grid" });
+      for (const lane of board.lanes) {
+        const laneCard = lanes.createDiv({ cls: "kanban-todo-lane-card" });
+        const laneTop = laneCard.createDiv({ cls: "kanban-todo-lane-top" });
+        laneTop.createEl("h4", {
+          cls: "kanban-todo-lane-title",
+          text: lane.name,
+        });
+
+        laneTop.createEl("span", {
+          cls: "milestone-stat-chip",
+          text: `${lane.openCount}/${lane.cards.length} open`,
+        });
+
+        if (lane.cards.length === 0) {
+          laneCard.createEl("p", {
+            cls: "milestone-todo-empty",
+            text: "No cards.",
+          });
+          continue;
+        }
+
+        const todoList = laneCard.createDiv({ cls: "milestone-todo-list" });
+        for (const todo of lane.cards) {
+          const todoItem = todoList.createDiv({
+            cls: "milestone-todo-item",
+          });
+
+          todoItem.createSpan({
+            cls: "milestone-todo-text",
+            text: `[ ] ${todo.text}`,
           });
         }
       }
@@ -1048,6 +1313,19 @@ class GoalsDashboardSettingTab extends PluginSettingTab {
           .setValue(this.plugin.settings.goalsFolder)
           .onChange(async (value) => {
             this.plugin.settings.goalsFolder = value.trim() || DEFAULT_SETTINGS.goalsFolder;
+            await this.plugin.saveSettings();
+          }),
+      );
+
+    new Setting(containerEl)
+      .setName("Kanban folder")
+      .setDesc("Folder that contains markdown kanban boards.")
+      .addText((text) =>
+        text
+          .setPlaceholder("Kanban")
+          .setValue(this.plugin.settings.kanbanFolder)
+          .onChange(async (value) => {
+            this.plugin.settings.kanbanFolder = normalizeFolderPath(value, DEFAULT_SETTINGS.kanbanFolder);
             await this.plugin.saveSettings();
           }),
       );
@@ -1284,9 +1562,14 @@ function normalizeMilestone(value) {
 }
 
 function normalizeGoalsFolder(value) {
-  return String(value ?? "")
+  return normalizeFolderPath(value, "Goals");
+}
+
+function normalizeFolderPath(value, fallback = "") {
+  const normalized = String(value ?? "")
     .trim()
-    .replace(/^\/+|\/+$/g, "") || "Goals";
+    .replace(/^\/+|\/+$/g, "");
+  return normalized || fallback;
 }
 
 async function ensureFolderExists(vault, folderPath) {
@@ -1526,6 +1809,23 @@ function extractTodoItems(markdown) {
   }
 
   return todos;
+}
+
+function parseSingleTodoFile(markdown) {
+  const lines = String(markdown ?? "").split(/\r?\n/);
+  for (const line of lines) {
+    const todoMatch = line.match(/^\s*[-*]\s+\[([ xX])\]\s+(.+)$/);
+    if (!todoMatch) {
+      continue;
+    }
+
+    return {
+      done: String(todoMatch[1]).toLowerCase() === "x",
+      text: String(todoMatch[2] ?? "").trim(),
+    };
+  }
+
+  return null;
 }
 
 function compareDue(leftDue, rightDue) {
