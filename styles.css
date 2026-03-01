@@ -613,6 +613,12 @@
   margin: 2px 0 12px;
 }
 
+.kanban-todo-lanes {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
 .kanban-todo-list-wrap {
   background: linear-gradient(
     180deg,
@@ -621,7 +627,16 @@
   );
   border: 1px solid var(--kanban-list-border);
   border-radius: 10px;
+  display: grid;
+  gap: 8px;
   padding: 10px;
+}
+
+.kanban-todo-list-top {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
 }
 
 .kanban-todo-list-title {
@@ -629,7 +644,13 @@
   display: flex;
   font-size: 20px;
   font-weight: 700;
-  margin: 2px 2px 10px;
+  margin: 2px;
+}
+
+.kanban-todo-list-stats {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .kanban-todo-checklist {
@@ -639,7 +660,7 @@
 }
 
 .kanban-todo-row {
-  align-items: center;
+  align-items: flex-start;
   background: color-mix(in srgb, var(--background-primary) 92%, #1f1f27 8%);
   border-bottom: 1px solid var(--kanban-row-border);
   display: grid;
@@ -652,8 +673,20 @@
   border-bottom: 0;
 }
 
+.kanban-todo-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 10px 12px;
+}
+
 .kanban-todo-row.is-done {
   opacity: 0.92;
+}
+
+.kanban-todo-body {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
 }
 
 .kanban-todo-checkbox {
@@ -699,6 +732,26 @@
 
 .kanban-todo-row-link:hover {
   color: var(--kanban-link-hover);
+}
+
+.kanban-todo-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.kanban-todo-meta-chip {
+  background: color-mix(in srgb, var(--background-secondary) 84%, #23232f 16%);
+  border: 1px solid color-mix(in srgb, var(--kanban-row-border) 82%, transparent);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.25;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 3px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 768px) {

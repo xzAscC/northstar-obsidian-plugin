@@ -16,6 +16,7 @@ const DEFAULT_SETTINGS = {
   goalsFolder: "Goals",
   kanbanFolder: "Kanban",
   boardOrder: [],
+  kanbanListOrder: ["Today"],
 };
 
 class GoalsDashboardPlugin extends Plugin {
@@ -129,6 +130,8 @@ class GoalsDashboardPlugin extends Plugin {
     if (!Array.isArray(this.settings.boardOrder)) {
       this.settings.boardOrder = [];
     }
+
+    this.settings.kanbanListOrder = normalizeKanbanListOrder(this.settings.kanbanListOrder, []);
 
     this.settings.goalsFolder = normalizeFolderPath(this.settings.goalsFolder, DEFAULT_SETTINGS.goalsFolder);
     this.settings.kanbanFolder = normalizeFolderPath(this.settings.kanbanFolder, DEFAULT_SETTINGS.kanbanFolder);
@@ -258,6 +261,8 @@ class GoalsDashboardPlugin extends Plugin {
   async createKanbanTodoFile(payload) {
     const name = String(payload.name ?? "").trim();
     const text = String(payload.text ?? "").trim();
+    const list = normalizeKanbanListName(payload.list);
+    const milestone = String(payload.milestone ?? "").trim();
 
     if (!name) {
       throw new Error("missing-todo-name");
@@ -267,14 +272,50 @@ class GoalsDashboardPlugin extends Plugin {
       throw new Error("missing-todo-text");
     }
 
+    if (!milestone) {
+      throw new Error("missing-todo-milestone");
+    }
+
     const kanbanFolder = normalizeFolderPath(this.settings.kanbanFolder, DEFAULT_SETTINGS.kanbanFolder);
     await ensureFolderExists(this.app.vault, kanbanFolder);
 
+    const nextListOrder = normalizeKanbanListOrder(this.settings.kanbanListOrder, [list]);
+    if (nextListOrder.join("\n") !== this.settings.kanbanListOrder.join("\n")) {
+      this.settings.kanbanListOrder = nextListOrder;
+      await this.saveSettings();
+    }
+
     const sanitizedBaseName = sanitizeFileName(name) || `todo-${Date.now()}`;
     const filePath = getUniquePath(this.app.vault, kanbanFolder, sanitizedBaseName);
-    const content = buildKanbanTodoTemplate(text);
+    const content = buildKanbanTodoTemplate({
+      text,
+      list,
+      milestone,
+      goal: payload.goal,
+      priority: payload.priority,
+      due: payload.due,
+      schedule: payload.schedule,
+      tags: payload.tags,
+      planHours: payload.planHours,
+      hoursLeft: payload.hoursLeft,
+    });
 
     return this.app.vault.create(filePath, content);
+  }
+
+  async createKanbanList(name) {
+    const listName = normalizeKanbanListName(name);
+    const nextListOrder = normalizeKanbanListOrder(this.settings.kanbanListOrder, [listName]);
+    const changed = nextListOrder.join("\n") !== this.settings.kanbanListOrder.join("\n");
+    if (changed) {
+      this.settings.kanbanListOrder = nextListOrder;
+      await this.saveSettings();
+    }
+
+    return {
+      name: listName,
+      created: changed,
+    };
   }
 
   async getGoalTodos(file) {
@@ -302,15 +343,38 @@ class GoalsDashboardPlugin extends Plugin {
         continue;
       }
 
+      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      const metadata = parseKanbanTodoMetadata(frontmatter);
+
       todos.push({
         file,
         name: file.basename,
         text: todo.text,
         done: todo.done,
+        list: metadata.list,
+        milestone: metadata.milestone,
+        goal: metadata.goal,
+        priority: metadata.priority,
+        due: metadata.due,
+        tags: metadata.tags,
+        schedule: metadata.schedule,
+        planHours: metadata.planHours,
+        hoursLeft: metadata.hoursLeft,
       });
     }
 
+    const listOrder = normalizeKanbanListOrder(
+      this.settings.kanbanListOrder,
+      todos.map((todo) => todo.list),
+    );
+
     return todos.sort((left, right) => {
+      const leftListIndex = listOrder.indexOf(left.list);
+      const rightListIndex = listOrder.indexOf(right.list);
+      if (leftListIndex !== rightListIndex) {
+        return leftListIndex - rightListIndex;
+      }
+
       if (left.done !== right.done) {
         return Number(left.done) - Number(right.done);
       }
@@ -1239,6 +1303,14 @@ class KanbanTodoDashboardView extends ItemView {
       await this.createTodoFromDashboard();
     });
 
+    const createListButton = headerActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "Add List",
+    });
+    createListButton.addEventListener("click", async () => {
+      await this.createListFromDashboard();
+    });
+
     const goalsButton = headerActions.createEl("button", {
       cls: "goals-dashboard-refresh",
       text: "Goals",
@@ -1262,13 +1334,6 @@ class KanbanTodoDashboardView extends ItemView {
     refreshButton.addEventListener("click", () => this.render());
 
     const todos = await this.plugin.getKanbanBoards();
-    if (todos.length === 0) {
-      container.createEl("p", {
-        cls: "goals-dashboard-empty",
-        text: `No todo files found in ${this.plugin.settings.kanbanFolder || "configured folder"}.`,
-      });
-      return;
-    }
 
     const openCount = todos.filter((todo) => !todo.done).length;
     const doneCount = todos.length - openCount;
@@ -1287,36 +1352,86 @@ class KanbanTodoDashboardView extends ItemView {
       text: `Total ${todos.length}`,
     });
 
-    const listWrap = container.createDiv({ cls: "kanban-todo-list-wrap" });
-    listWrap.createEl("h3", {
-      cls: "kanban-todo-list-title",
-      text: "Today",
-    });
+    const todosByList = groupBy(todos, (todo) => todo.list);
+    const listsInView = normalizeKanbanListOrder(
+      this.plugin.settings.kanbanListOrder,
+      Array.from(todosByList.keys()),
+    );
 
-    const list = listWrap.createDiv({ cls: "kanban-todo-checklist" });
-    for (const todo of todos) {
-      const row = list.createDiv({
-        cls: `kanban-todo-row${todo.done ? " is-done" : ""}`,
+    if (todos.length === 0) {
+      container.createEl("p", {
+        cls: "goals-dashboard-empty",
+        text: `No todo files found in ${this.plugin.settings.kanbanFolder || "configured folder"}.`,
+      });
+    }
+
+    const lanes = container.createDiv({ cls: "kanban-todo-lanes" });
+    for (const listName of listsInView) {
+      const listTodos = [...(todosByList.get(listName) || [])];
+      const openInList = listTodos.filter((todo) => !todo.done).length;
+      const doneInList = listTodos.length - openInList;
+
+      const listWrap = lanes.createDiv({ cls: "kanban-todo-list-wrap" });
+      const listTop = listWrap.createDiv({ cls: "kanban-todo-list-top" });
+      listTop.createEl("h3", {
+        cls: "kanban-todo-list-title",
+        text: listName,
       });
 
-      const checkbox = row.createEl("button", {
-        cls: `kanban-todo-checkbox${todo.done ? " is-checked" : ""}`,
+      const listStats = listTop.createDiv({ cls: "kanban-todo-list-stats" });
+      listStats.createEl("span", {
+        cls: "milestone-stat-chip",
+        text: `Open ${openInList}`,
       });
-      checkbox.ariaLabel = todo.done ? "Mark todo as open" : "Mark todo as done";
-      checkbox.setAttribute("aria-checked", todo.done ? "true" : "false");
-      setIcon(checkbox, todo.done ? "check" : "");
-      checkbox.addEventListener("click", async (event) => {
-        event.preventDefault();
-        await this.toggleTodoState(todo.file, todo.done);
+      listStats.createEl("span", {
+        cls: "milestone-stat-chip",
+        text: `Done ${doneInList}`,
       });
 
-      const openButton = row.createEl("button", {
-        cls: "kanban-todo-row-link",
-        text: todo.text || todo.name,
-      });
-      openButton.addEventListener("click", async () => {
-        await this.openBoardInRightPane(todo.file);
-      });
+      const list = listWrap.createDiv({ cls: "kanban-todo-checklist" });
+      if (listTodos.length === 0) {
+        const empty = list.createDiv({ cls: "kanban-todo-empty" });
+        empty.createSpan({ text: "No todos in this list yet." });
+        continue;
+      }
+
+      for (const todo of listTodos) {
+        const row = list.createDiv({
+          cls: `kanban-todo-row${todo.done ? " is-done" : ""}`,
+        });
+
+        const checkbox = row.createEl("button", {
+          cls: `kanban-todo-checkbox${todo.done ? " is-checked" : ""}`,
+        });
+        checkbox.ariaLabel = todo.done ? "Mark todo as open" : "Mark todo as done";
+        checkbox.setAttribute("aria-checked", todo.done ? "true" : "false");
+        setIcon(checkbox, todo.done ? "check" : "");
+        checkbox.addEventListener("click", async (event) => {
+          event.preventDefault();
+          await this.toggleTodoState(todo.file, todo.done);
+        });
+
+        const body = row.createDiv({ cls: "kanban-todo-body" });
+
+        const openButton = body.createEl("button", {
+          cls: "kanban-todo-row-link",
+          text: todo.text || todo.name,
+        });
+        openButton.addEventListener("click", async () => {
+          await this.openBoardInRightPane(todo.file);
+        });
+
+        const metadata = buildTodoMetadataLabels(todo);
+        if (metadata.length > 0) {
+          const metadataRow = body.createDiv({ cls: "kanban-todo-meta" });
+          for (const label of metadata) {
+            metadataRow.createSpan({
+              cls: "kanban-todo-meta-chip",
+              text: label,
+            });
+          }
+        }
+      }
     }
   }
 
@@ -1335,9 +1450,24 @@ class KanbanTodoDashboardView extends ItemView {
   }
 
   async createTodoFromDashboard() {
+    const todoLists = normalizeKanbanListOrder(
+      this.plugin.settings.kanbanListOrder,
+      (await this.plugin.getKanbanBoards()).map((todo) => todo.list),
+    );
+
     const payload = await this.promptCreateTodo({
       name: "",
       text: "",
+      list: todoLists[0] || "Today",
+      listOptions: todoLists,
+      milestone: "",
+      goal: "",
+      priority: "medium",
+      due: "",
+      schedule: "",
+      tags: "",
+      planHours: "",
+      hoursLeft: "",
     });
     if (!payload) {
       return;
@@ -1353,6 +1483,8 @@ class KanbanTodoDashboardView extends ItemView {
         new Notice("Please provide a todo name.");
       } else if (error && error.message === "missing-todo-text") {
         new Notice("Please provide todo content.");
+      } else if (error && error.message === "missing-todo-milestone") {
+        new Notice("Please provide a milestone for this todo.");
       } else {
         console.error(error);
         new Notice("Failed to create todo.");
@@ -1360,9 +1492,36 @@ class KanbanTodoDashboardView extends ItemView {
     }
   }
 
+  async createListFromDashboard() {
+    const listName = await this.promptCreateList();
+    if (!listName) {
+      return;
+    }
+
+    try {
+      const result = await this.plugin.createKanbanList(listName);
+      if (result.created) {
+        new Notice(`List created: ${result.name}`);
+      } else {
+        new Notice(`List already exists: ${result.name}`);
+      }
+      await this.render();
+    } catch (error) {
+      console.error(error);
+      new Notice("Failed to create list.");
+    }
+  }
+
   async promptCreateTodo(defaults) {
     return new Promise((resolve) => {
       const modal = new CreateKanbanTodoModal(this.app, defaults, resolve);
+      modal.open();
+    });
+  }
+
+  async promptCreateList() {
+    return new Promise((resolve) => {
+      const modal = new CreateKanbanListModal(this.app, resolve);
       modal.open();
     });
   }
@@ -1576,6 +1735,70 @@ class CreateKanbanTodoModal extends Modal {
       required: true,
     });
 
+    const listInput = this.createInputFieldWithSuggestions(form, {
+      label: "List",
+      placeholder: "Today",
+      value: this.defaults.list,
+      suggestions: this.defaults.listOptions,
+      required: true,
+    });
+
+    const milestoneInput = this.createInputField(form, {
+      label: "Milestone",
+      placeholder: "Q1 Shipping",
+      value: this.defaults.milestone,
+      required: true,
+    });
+
+    const goalInput = this.createInputField(form, {
+      label: "Goal",
+      placeholder: "Optional linked goal",
+      value: this.defaults.goal,
+    });
+
+    const priorityInput = this.createInputFieldWithSuggestions(form, {
+      label: "Priority",
+      placeholder: "medium",
+      value: this.defaults.priority,
+      suggestions: ["high", "medium", "low"],
+    });
+
+    const dueInput = this.createInputField(form, {
+      label: "Due Date",
+      type: "date",
+      value: this.defaults.due,
+    });
+
+    const scheduleInput = this.createInputField(form, {
+      label: "Schedule",
+      placeholder: "Mon-Fri 09:00-11:00",
+      value: this.defaults.schedule,
+    });
+
+    const tagsInput = this.createInputField(form, {
+      label: "Tags",
+      placeholder: "research, writing",
+      value: this.defaults.tags,
+    });
+
+    const planHoursInput = this.createInputField(form, {
+      label: "Plan Hours",
+      type: "number",
+      value: this.defaults.planHours,
+      placeholder: "8",
+    });
+    planHoursInput.step = "0.5";
+    planHoursInput.min = "0";
+
+    const hoursLeftInput = this.createInputField(form, {
+      label: "Hours Left",
+      type: "number",
+      value: this.defaults.hoursLeft,
+      placeholder: "6",
+    });
+    hoursLeftInput.step = "0.5";
+    hoursLeftInput.min = "0";
+
     const actions = form.createDiv({ cls: "goals-create-actions" });
     const cancelButton = actions.createEl("button", {
       type: "button",
@@ -1598,6 +1821,15 @@ class CreateKanbanTodoModal extends Modal {
       this.onSubmit({
         name: nameInput.value,
         text: todoInput.value,
+        list: listInput.value,
+        milestone: milestoneInput.value,
+        goal: goalInput.value,
+        priority: priorityInput.value,
+        due: dueInput.value,
+        schedule: scheduleInput.value,
+        tags: tagsInput.value,
+        planHours: planHoursInput.value,
+        hoursLeft: hoursLeftInput.value,
       });
       this.close();
     });
@@ -1656,6 +1888,108 @@ class CreateKanbanTodoModal extends Modal {
 
     textarea.rows = 3;
     return textarea;
+  }
+
+  createInputFieldWithSuggestions(container, config) {
+    const field = container.createDiv({ cls: "goals-create-field" });
+    field.createEl("label", {
+      cls: "goals-create-label",
+      text: config.label,
+    });
+
+    const input = field.createEl("input", {
+      cls: "goals-create-input",
+      type: config.type || "text",
+      value: String(config.value ?? ""),
+      placeholder: config.placeholder || "",
+    });
+
+    if (config.required) {
+      input.required = true;
+    }
+
+    const datalistId = createDatalistId(config.label);
+    attachSuggestions(field, input, datalistId, config.suggestions);
+
+    return input;
+  }
+}
+
+class CreateKanbanListModal extends Modal {
+  constructor(app, onSubmit) {
+    super(app);
+    this.onSubmit = onSubmit;
+    this.submitted = false;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    this.titleEl.setText("Add Kanban List");
+    contentEl.empty();
+    contentEl.addClass("goals-create-modal");
+
+    const form = contentEl.createEl("form", { cls: "goals-create-form" });
+    const listInput = this.createInputField(form, {
+      label: "List Name",
+      placeholder: "Next",
+      required: true,
+    });
+
+    const actions = form.createDiv({ cls: "goals-create-actions" });
+    const cancelButton = actions.createEl("button", {
+      type: "button",
+      text: "Cancel",
+    });
+    actions.createEl("button", {
+      cls: "mod-cta",
+      type: "submit",
+      text: "Add list",
+    });
+
+    cancelButton.addEventListener("click", () => {
+      this.close();
+    });
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      this.submitted = true;
+      this.onSubmit(listInput.value);
+      this.close();
+    });
+
+    window.setTimeout(() => {
+      listInput.focus();
+      listInput.select();
+    }, 0);
+  }
+
+  onClose() {
+    if (!this.submitted) {
+      this.onSubmit(null);
+    }
+
+    this.contentEl.empty();
+  }
+
+  createInputField(container, config) {
+    const field = container.createDiv({ cls: "goals-create-field" });
+    field.createEl("label", {
+      cls: "goals-create-label",
+      text: config.label,
+    });
+
+    const input = field.createEl("input", {
+      cls: "goals-create-input",
+      type: config.type || "text",
+      value: String(config.value ?? ""),
+      placeholder: config.placeholder || "",
+    });
+
+    if (config.required) {
+      input.required = true;
+    }
+
+    return input;
   }
 }
 
@@ -1745,6 +2079,151 @@ function normalizeBoard(value) {
   return board || "Uncategorized";
 }
 
+function normalizeKanbanListName(value) {
+  const list = String(value ?? "").trim();
+  return list || "Today";
+}
+
+function normalizeKanbanListOrder(persistedOrder, listsInView) {
+  const unique = [];
+
+  for (const list of Array.isArray(persistedOrder) ? persistedOrder : []) {
+    const normalized = normalizeKanbanListName(list);
+    if (!unique.includes(normalized)) {
+      unique.push(normalized);
+    }
+  }
+
+  for (const list of Array.isArray(listsInView) ? listsInView : []) {
+    const normalized = normalizeKanbanListName(list);
+    if (!unique.includes(normalized)) {
+      unique.push(normalized);
+    }
+  }
+
+  if (unique.length === 0) {
+    unique.push("Today");
+  }
+
+  return unique;
+}
+
+function normalizePriority(value) {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "high" || normalized === "medium" || normalized === "low") {
+    return normalized;
+  }
+  return "medium";
+}
+
+function normalizeDateString(value) {
+  return String(value ?? "").trim();
+}
+
+function parseHoursValue(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  const numeric = Number(raw);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return null;
+  }
+
+  return Number(numeric.toFixed(2));
+}
+
+function normalizeTagList(value) {
+  const values = Array.isArray(value)
+    ? value
+    : String(value ?? "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+  const normalized = [];
+  for (const entry of values) {
+    const cleaned = String(entry ?? "")
+      .trim()
+      .replace(/^#/, "")
+      .replace(/\s+/g, "-");
+    if (!cleaned || normalized.includes(cleaned)) {
+      continue;
+    }
+    normalized.push(cleaned);
+  }
+
+  return normalized;
+}
+
+function parseKanbanTodoMetadata(frontmatter) {
+  const fm = frontmatter || {};
+  const planHours = parseHoursValue(fm.planHours ?? fm.plannedHours);
+  const hoursLeft = parseHoursValue(fm.hoursLeft);
+
+  return {
+    list: normalizeKanbanListName(fm.list),
+    milestone: normalizeMilestone(fm.milestone),
+    goal: String(fm.goal ?? "").trim(),
+    priority: normalizePriority(fm.priority),
+    due: normalizeDateString(fm.due),
+    tags: normalizeTagList(fm.tags),
+    schedule: String(fm.schedule ?? fm.schdule ?? "").trim(),
+    planHours,
+    hoursLeft,
+  };
+}
+
+function formatHoursValue(value) {
+  if (!Number.isFinite(value)) {
+    return "";
+  }
+
+  return Number.isInteger(value) ? String(value) : String(value).replace(/\.0+$/, "");
+}
+
+function buildTodoMetadataLabels(todo) {
+  const labels = [];
+  labels.push(`Milestone: ${todo.milestone || "Unscheduled Milestone"}`);
+
+  if (todo.goal) {
+    labels.push(`Goal: ${todo.goal}`);
+  }
+
+  labels.push(`Priority: ${capitalizeLabel(todo.priority || "medium")}`);
+
+  if (todo.due) {
+    labels.push(`Due: ${todo.due}`);
+  }
+
+  if (todo.schedule) {
+    labels.push(`Schedule: ${todo.schedule}`);
+  }
+
+  if (Number.isFinite(todo.hoursLeft) && Number.isFinite(todo.planHours)) {
+    labels.push(`Hours Left: ${formatHoursValue(todo.hoursLeft)}/${formatHoursValue(todo.planHours)}h`);
+  } else if (Number.isFinite(todo.hoursLeft)) {
+    labels.push(`Hours Left: ${formatHoursValue(todo.hoursLeft)}h`);
+  } else if (Number.isFinite(todo.planHours)) {
+    labels.push(`Plan Hours: ${formatHoursValue(todo.planHours)}h`);
+  }
+
+  if (Array.isArray(todo.tags) && todo.tags.length > 0) {
+    labels.push(`Tags: ${todo.tags.map((tag) => `#${tag}`).join(" ")}`);
+  }
+
+  return labels;
+}
+
+function capitalizeLabel(value) {
+  const text = String(value ?? "").trim();
+  if (!text) {
+    return "";
+  }
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 function normalizeMilestone(value) {
   const milestone = String(value ?? "").trim();
   return milestone || "Unscheduled Milestone";
@@ -1827,9 +2306,33 @@ function buildGoalTemplate(values) {
   return lines.join("\n");
 }
 
-function buildKanbanTodoTemplate(text) {
-  const line = String(text ?? "").replace(/\r?\n+/g, " ").trim();
-  return `- [ ] ${line}\n`;
+function buildKanbanTodoTemplate(payload) {
+  const line = String(payload.text ?? "").replace(/\r?\n+/g, " ").trim();
+  const milestone = String(payload.milestone ?? "").trim();
+  const goal = String(payload.goal ?? "").trim();
+  const priority = normalizePriority(payload.priority);
+  const due = normalizeDateString(payload.due);
+  const schedule = String(payload.schedule ?? "").trim();
+  const tags = normalizeTagList(payload.tags);
+  const planHours = parseHoursValue(payload.planHours);
+  const hoursLeft = parseHoursValue(payload.hoursLeft);
+
+  return [
+    "---",
+    `list: ${toYamlString(normalizeKanbanListName(payload.list))}`,
+    `milestone: ${toYamlString(milestone)}`,
+    `goal: ${toYamlString(goal)}`,
+    `priority: ${toYamlString(priority)}`,
+    `due: ${toYamlString(due)}`,
+    `schedule: ${toYamlString(schedule)}`,
+    `tags: ${toYamlArray(tags)}`,
+    `planHours: ${Number.isFinite(planHours) ? planHours : 0}`,
+    `hoursLeft: ${Number.isFinite(hoursLeft) ? hoursLeft : Number.isFinite(planHours) ? planHours : 0}`,
+    "---",
+    "",
+    `- [ ] ${line}`,
+    "",
+  ].join("\n");
 }
 
 function toYamlString(value) {
@@ -1837,6 +2340,11 @@ function toYamlString(value) {
     .replace(/\\/g, "\\\\")
     .replace(/"/g, '\\"');
   return `"${escaped}"`;
+}
+
+function toYamlArray(values) {
+  const entries = Array.isArray(values) ? values : [];
+  return `[${entries.map((entry) => toYamlString(entry)).join(", ")}]`;
 }
 
 function isGoalArchived(goal) {
