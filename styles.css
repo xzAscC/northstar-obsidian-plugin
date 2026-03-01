@@ -754,6 +754,115 @@
   white-space: nowrap;
 }
 
+.northstar-homepage-view {
+  --home-card-bg: color-mix(in srgb, var(--background-secondary) 88%, #d7ebe2 12%);
+  --home-card-border: color-mix(in srgb, var(--background-modifier-border) 76%, #7bb39f 24%);
+}
+
+.northstar-homepage-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.northstar-homepage-card {
+  background: var(--home-card-bg);
+  border: 1px solid var(--home-card-border);
+  border-radius: 14px;
+  display: grid;
+  gap: 10px;
+  min-height: 240px;
+  padding: 12px;
+}
+
+.northstar-homepage-card-top {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.northstar-homepage-card-top h3 {
+  margin: 0;
+}
+
+.northstar-homepage-card-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.northstar-calendar-list {
+  display: grid;
+  gap: 10px;
+}
+
+.northstar-calendar-group {
+  display: grid;
+  gap: 4px;
+}
+
+.northstar-calendar-date {
+  color: var(--text-normal);
+  margin: 0;
+}
+
+.northstar-calendar-event {
+  align-items: baseline;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 70px minmax(0, 1fr);
+}
+
+.northstar-calendar-time {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.northstar-calendar-title {
+  color: var(--text-normal);
+  font-size: 14px;
+}
+
+.northstar-daily-list-add {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.northstar-daily-list {
+  display: grid;
+  gap: 8px;
+}
+
+.northstar-daily-item {
+  align-items: center;
+  background: color-mix(in srgb, var(--background-primary) 88%, #ffffff 12%);
+  border: 1px solid color-mix(in srgb, var(--home-card-border) 75%, transparent);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 8px 10px;
+}
+
+.northstar-daily-item.is-done .northstar-daily-item-text {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.northstar-daily-item-text {
+  font-size: 14px;
+}
+
+.northstar-daily-remove {
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
+.northstar-settings-textarea {
+  width: 100%;
+}
+
 @media (max-width: 768px) {
   .board-summary {
     grid-template-columns: 1fr;
@@ -792,5 +901,9 @@
 
   .kanban-todo-row-link {
     font-size: 16px;
+  }
+
+  .northstar-calendar-event {
+    grid-template-columns: 60px minmax(0, 1fr);
   }
 }
