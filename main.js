@@ -255,6 +255,28 @@ class GoalsDashboardPlugin extends Plugin {
     return this.app.vault.create(filePath, content);
   }
 
+  async createKanbanTodoFile(payload) {
+    const name = String(payload.name ?? "").trim();
+    const text = String(payload.text ?? "").trim();
+
+    if (!name) {
+      throw new Error("missing-todo-name");
+    }
+
+    if (!text) {
+      throw new Error("missing-todo-text");
+    }
+
+    const kanbanFolder = normalizeFolderPath(this.settings.kanbanFolder, DEFAULT_SETTINGS.kanbanFolder);
+    await ensureFolderExists(this.app.vault, kanbanFolder);
+
+    const sanitizedBaseName = sanitizeFileName(name) || `todo-${Date.now()}`;
+    const filePath = getUniquePath(this.app.vault, kanbanFolder, sanitizedBaseName);
+    const content = buildKanbanTodoTemplate(text);
+
+    return this.app.vault.create(filePath, content);
+  }
+
   async getGoalTodos(file) {
     const raw = await this.app.vault.cachedRead(file);
     return extractTodoItems(raw);
@@ -262,7 +284,7 @@ class GoalsDashboardPlugin extends Plugin {
 
   async getKanbanBoards() {
     const allFiles = this.app.vault.getMarkdownFiles();
-    const boards = [];
+    const todos = [];
     const base = normalizeFolderPath(this.settings.kanbanFolder, "");
     const folderPrefix = base ? `${base}/` : "";
 
@@ -276,32 +298,44 @@ class GoalsDashboardPlugin extends Plugin {
 
       const raw = await this.app.vault.cachedRead(file);
       const todo = parseSingleTodoFile(raw);
-      if (!todo || todo.done) {
+      if (!todo) {
         continue;
       }
 
-      boards.push({
+      todos.push({
         file,
         name: file.basename,
-        lanes: [
-          {
-            name: "Todo",
-            cards: [
-              {
-                done: false,
-                text: todo.text,
-              },
-            ],
-            openCount: 1,
-            doneCount: 0,
-          },
-        ],
-        openCount: 1,
-        doneCount: 0,
+        text: todo.text,
+        done: todo.done,
       });
     }
 
-    return boards.sort((left, right) => String(left.name).localeCompare(String(right.name)));
+    return todos.sort((left, right) => {
+      if (left.done !== right.done) {
+        return Number(left.done) - Number(right.done);
+      }
+
+      return String(left.name).localeCompare(String(right.name));
+    });
+  }
+
+  async setKanbanTodoDone(file, done) {
+    const raw = await this.app.vault.cachedRead(file);
+    const lines = String(raw ?? "").split(/\r?\n/);
+    const targetState = done ? "x" : " ";
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const match = lines[index].match(/^(\s*[-*]\s+)\[([ xX])\](\s+.+)$/);
+      if (!match) {
+        continue;
+      }
+
+      lines[index] = `${match[1]}[${targetState}]${match[3]}`;
+      await this.app.vault.modify(file, lines.join("\n"));
+      return;
+    }
+
+    throw new Error("todo-checkbox-not-found");
   }
 
   async getMilestones() {
@@ -1023,6 +1057,7 @@ class MilestoneDashboardView extends ItemView {
     header.createEl("h2", { text: "Milestone Kanban" });
 
     const headerActions = header.createDiv({ cls: "goals-dashboard-header-actions" });
+
     const goalsButton = headerActions.createEl("button", {
       cls: "goals-dashboard-refresh",
       text: "Goals",
@@ -1119,6 +1154,7 @@ class MilestoneDashboardView extends ItemView {
       }
     }
   }
+
 }
 
 class KanbanTodoDashboardView extends ItemView {
@@ -1189,6 +1225,20 @@ class KanbanTodoDashboardView extends ItemView {
     header.createEl("h2", { text: "Kanban Todo" });
 
     const headerActions = header.createDiv({ cls: "goals-dashboard-header-actions" });
+    const createButton = headerActions.createEl("button", {
+      cls: "goals-dashboard-create",
+    });
+    createButton.ariaLabel = "Create New Todo";
+    const createIcon = createButton.createSpan({ cls: "goals-dashboard-create-icon" });
+    setIcon(createIcon, "plus");
+    createButton.createSpan({
+      cls: "goals-dashboard-create-label",
+      text: "Create New Todo",
+    });
+    createButton.addEventListener("click", async () => {
+      await this.createTodoFromDashboard();
+    });
+
     const goalsButton = headerActions.createEl("button", {
       cls: "goals-dashboard-refresh",
       text: "Goals",
@@ -1211,84 +1261,110 @@ class KanbanTodoDashboardView extends ItemView {
     });
     refreshButton.addEventListener("click", () => this.render());
 
-    const boards = await this.plugin.getKanbanBoards();
-    if (boards.length === 0) {
+    const todos = await this.plugin.getKanbanBoards();
+    if (todos.length === 0) {
       container.createEl("p", {
         cls: "goals-dashboard-empty",
-        text: `No kanban boards found in ${this.plugin.settings.kanbanFolder || "configured folder"}.`,
+        text: `No todo files found in ${this.plugin.settings.kanbanFolder || "configured folder"}.`,
       });
       return;
     }
 
-    const boardList = container.createDiv({ cls: "kanban-todo-board-list" });
-    for (const board of boards) {
-      const boardCard = boardList.createDiv({ cls: "kanban-todo-board-card" });
-      const boardTop = boardCard.createDiv({ cls: "kanban-todo-board-top" });
-      const boardOpenButton = boardTop.createEl("button", {
-        cls: "kanban-todo-board-open",
-        text: board.name,
+    const openCount = todos.filter((todo) => !todo.done).length;
+    const doneCount = todos.length - openCount;
+
+    const statRow = container.createDiv({ cls: "kanban-todo-inline-stats" });
+    statRow.createEl("span", {
+      cls: "milestone-stat-chip",
+      text: `Open ${openCount}`,
+    });
+    statRow.createEl("span", {
+      cls: "milestone-stat-chip",
+      text: `Done ${doneCount}`,
+    });
+    statRow.createEl("span", {
+      cls: "milestone-stat-chip",
+      text: `Total ${todos.length}`,
+    });
+
+    const listWrap = container.createDiv({ cls: "kanban-todo-list-wrap" });
+    listWrap.createEl("h3", {
+      cls: "kanban-todo-list-title",
+      text: "Today",
+    });
+
+    const list = listWrap.createDiv({ cls: "kanban-todo-checklist" });
+    for (const todo of todos) {
+      const row = list.createDiv({
+        cls: `kanban-todo-row${todo.done ? " is-done" : ""}`,
       });
-      boardOpenButton.addEventListener("click", async () => {
-        await this.openBoardInRightPane(board.file);
+
+      const checkbox = row.createEl("button", {
+        cls: `kanban-todo-checkbox${todo.done ? " is-checked" : ""}`,
+      });
+      checkbox.ariaLabel = todo.done ? "Mark todo as open" : "Mark todo as done";
+      checkbox.setAttribute("aria-checked", todo.done ? "true" : "false");
+      setIcon(checkbox, todo.done ? "check" : "");
+      checkbox.addEventListener("click", async (event) => {
+        event.preventDefault();
+        await this.toggleTodoState(todo.file, todo.done);
       });
 
-      const boardStats = boardTop.createDiv({ cls: "kanban-todo-board-stats" });
-      boardStats.createEl("span", {
-        cls: "milestone-stat-chip",
-        text: `Open ${board.openCount}`,
+      const openButton = row.createEl("button", {
+        cls: "kanban-todo-row-link",
+        text: todo.text || todo.name,
       });
-      boardStats.createEl("span", {
-        cls: "milestone-stat-chip",
-        text: `Done ${board.doneCount}`,
+      openButton.addEventListener("click", async () => {
+        await this.openBoardInRightPane(todo.file);
       });
-      boardStats.createEl("span", {
-        cls: "milestone-stat-chip",
-        text: `Total ${board.openCount + board.doneCount}`,
-      });
+    }
+  }
 
-      if (board.lanes.length === 0) {
-        boardCard.createEl("p", {
-          cls: "milestone-todo-empty",
-          text: "No todo cards in this board.",
-        });
-        continue;
-      }
-
-      const lanes = boardCard.createDiv({ cls: "kanban-todo-lane-grid" });
-      for (const lane of board.lanes) {
-        const laneCard = lanes.createDiv({ cls: "kanban-todo-lane-card" });
-        const laneTop = laneCard.createDiv({ cls: "kanban-todo-lane-top" });
-        laneTop.createEl("h4", {
-          cls: "kanban-todo-lane-title",
-          text: lane.name,
-        });
-
-        laneTop.createEl("span", {
-          cls: "milestone-stat-chip",
-          text: `${lane.openCount}/${lane.cards.length} open`,
-        });
-
-        if (lane.cards.length === 0) {
-          laneCard.createEl("p", {
-            cls: "milestone-todo-empty",
-            text: "No cards.",
-          });
-          continue;
-        }
-
-        const todoList = laneCard.createDiv({ cls: "milestone-todo-list" });
-        for (const todo of lane.cards) {
-          const todoItem = todoList.createDiv({
-            cls: "milestone-todo-item",
-          });
-
-          todoItem.createSpan({
-            cls: "milestone-todo-text",
-            text: `[ ] ${todo.text}`,
-          });
-        }
+  async toggleTodoState(file, currentDone) {
+    try {
+      await this.plugin.setKanbanTodoDone(file, !currentDone);
+      await this.render();
+    } catch (error) {
+      if (error && error.message === "todo-checkbox-not-found") {
+        new Notice("No checkbox todo found in this file.");
+      } else {
+        console.error(error);
+        new Notice("Failed to update todo status.");
       }
     }
+  }
+
+  async createTodoFromDashboard() {
+    const payload = await this.promptCreateTodo({
+      name: "",
+      text: "",
+    });
+    if (!payload) {
+      return;
+    }
+
+    try {
+      const file = await this.plugin.createKanbanTodoFile(payload);
+      new Notice(`Todo created: ${file.basename}`);
+      await this.render();
+      await this.openBoardInRightPane(file);
+    } catch (error) {
+      if (error && error.message === "missing-todo-name") {
+        new Notice("Please provide a todo name.");
+      } else if (error && error.message === "missing-todo-text") {
+        new Notice("Please provide todo content.");
+      } else {
+        console.error(error);
+        new Notice("Failed to create todo.");
+      }
+    }
+  }
+
+  async promptCreateTodo(defaults) {
+    return new Promise((resolve) => {
+      const modal = new CreateKanbanTodoModal(this.app, defaults, resolve);
+      modal.open();
+    });
   }
 }
 
@@ -1470,6 +1546,119 @@ class CreateGoalModal extends Modal {
   }
 }
 
+class CreateKanbanTodoModal extends Modal {
+  constructor(app, defaults, onSubmit) {
+    super(app);
+    this.defaults = defaults;
+    this.onSubmit = onSubmit;
+    this.submitted = false;
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    this.titleEl.setText("Create New Todo");
+    contentEl.empty();
+    contentEl.addClass("goals-create-modal");
+
+    const form = contentEl.createEl("form", { cls: "goals-create-form" });
+
+    const nameInput = this.createInputField(form, {
+      label: "Todo Name",
+      placeholder: "Inbox",
+      value: this.defaults.name,
+      required: true,
+    });
+
+    const todoInput = this.createTextareaField(form, {
+      label: "Todo",
+      placeholder: "Follow up plugin issue #12",
+      value: this.defaults.text,
+      required: true,
+    });
+
+    const actions = form.createDiv({ cls: "goals-create-actions" });
+    const cancelButton = actions.createEl("button", {
+      type: "button",
+      text: "Cancel",
+    });
+    actions.createEl("button", {
+      cls: "mod-cta",
+      type: "submit",
+      text: "Create",
+    });
+
+    cancelButton.addEventListener("click", () => {
+      this.close();
+    });
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+
+      this.submitted = true;
+      this.onSubmit({
+        name: nameInput.value,
+        text: todoInput.value,
+      });
+      this.close();
+    });
+
+    window.setTimeout(() => {
+      nameInput.focus();
+      nameInput.select();
+    }, 0);
+  }
+
+  onClose() {
+    if (!this.submitted) {
+      this.onSubmit(null);
+    }
+
+    this.contentEl.empty();
+  }
+
+  createInputField(container, config) {
+    const field = container.createDiv({ cls: "goals-create-field" });
+    field.createEl("label", {
+      cls: "goals-create-label",
+      text: config.label,
+    });
+
+    const input = field.createEl("input", {
+      cls: "goals-create-input",
+      type: config.type || "text",
+      value: String(config.value ?? ""),
+      placeholder: config.placeholder || "",
+    });
+
+    if (config.required) {
+      input.required = true;
+    }
+
+    return input;
+  }
+
+  createTextareaField(container, config) {
+    const field = container.createDiv({ cls: "goals-create-field" });
+    field.createEl("label", {
+      cls: "goals-create-label",
+      text: config.label,
+    });
+
+    const textarea = field.createEl("textarea", {
+      cls: "goals-create-input",
+      text: String(config.value ?? ""),
+      placeholder: config.placeholder || "",
+    });
+
+    if (config.required) {
+      textarea.required = true;
+    }
+
+    textarea.rows = 3;
+    return textarea;
+  }
+}
+
 function groupBy(items, getKey) {
   const map = new Map();
   for (const item of items) {
@@ -1636,6 +1825,11 @@ function buildGoalTemplate(values) {
   ];
 
   return lines.join("\n");
+}
+
+function buildKanbanTodoTemplate(text) {
+  const line = String(text ?? "").replace(/\r?\n+/g, " ").trim();
+  return `- [ ] ${line}\n`;
 }
 
 function toYamlString(value) {

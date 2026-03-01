@@ -595,80 +595,110 @@
 }
 
 .kanban-todo-dashboard-view {
+  --kanban-list-bg: color-mix(in srgb, var(--background-primary) 88%, #1f1f26 12%);
+  --kanban-list-border: color-mix(in srgb, var(--background-modifier-border) 78%, #50505d 22%);
+  --kanban-row-border: color-mix(in srgb, var(--background-modifier-border) 86%, #5a5a67 14%);
+  --kanban-checkbox-border: color-mix(in srgb, var(--text-muted) 72%, #7f7f94 28%);
+  --kanban-link: color-mix(in srgb, var(--text-accent) 64%, #bb7cff 36%);
+  --kanban-link-hover: color-mix(in srgb, var(--text-accent) 48%, #c79dff 52%);
   height: calc(100vh - 120px);
   overflow-x: hidden;
   overflow-y: auto;
 }
 
-.kanban-todo-board-list {
-  display: grid;
-  gap: 12px;
-}
-
-.kanban-todo-board-card {
-  background: color-mix(in srgb, var(--background-secondary) 86%, #d8ecf2 14%);
-  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 72%, #76aebe 28%);
-  border-radius: 14px;
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-}
-
-.kanban-todo-board-top {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: space-between;
-}
-
-.kanban-todo-board-open {
-  background: transparent;
-  border: 0;
-  color: var(--text-normal);
-  cursor: pointer;
-  font-size: 18px;
-  font-weight: 700;
-  padding: 0;
-  text-align: left;
-}
-
-.kanban-todo-board-open:hover {
-  color: var(--text-accent);
-  text-decoration: underline;
-}
-
-.kanban-todo-board-stats {
+.kanban-todo-inline-stats {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 6px;
+  margin: 2px 0 12px;
 }
 
-.kanban-todo-lane-grid {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-}
-
-.kanban-todo-lane-card {
-  background: color-mix(in srgb, var(--background-primary) 90%, #6ea5b5 10%);
-  border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, #7eb6c4 30%);
-  border-radius: 12px;
-  display: grid;
-  gap: 8px;
-  min-height: 160px;
+.kanban-todo-list-wrap {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--kanban-list-bg) 96%, #202028 4%),
+    color-mix(in srgb, var(--kanban-list-bg) 88%, #1b1b22 12%)
+  );
+  border: 1px solid var(--kanban-list-border);
+  border-radius: 10px;
   padding: 10px;
 }
 
-.kanban-todo-lane-top {
+.kanban-todo-list-title {
   align-items: center;
   display: flex;
-  gap: 8px;
-  justify-content: space-between;
+  font-size: 20px;
+  font-weight: 700;
+  margin: 2px 2px 10px;
 }
 
-.kanban-todo-lane-title {
+.kanban-todo-checklist {
+  border: 1px solid var(--kanban-row-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.kanban-todo-row {
+  align-items: center;
+  background: color-mix(in srgb, var(--background-primary) 92%, #1f1f27 8%);
+  border-bottom: 1px solid var(--kanban-row-border);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 22px minmax(0, 1fr);
+  padding: 10px 12px;
+}
+
+.kanban-todo-row:last-child {
+  border-bottom: 0;
+}
+
+.kanban-todo-row.is-done {
+  opacity: 0.92;
+}
+
+.kanban-todo-checkbox {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--kanban-checkbox-border);
+  border-radius: 6px;
+  color: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  height: 20px;
+  justify-content: center;
+  padding: 0;
+  transition: border-color 120ms ease;
+  width: 20px;
+}
+
+.kanban-todo-checkbox:hover {
+  border-color: var(--text-accent);
+}
+
+.kanban-todo-checkbox.is-checked {
+  background: color-mix(in srgb, var(--text-accent) 74%, #8d5bff 26%);
+  border-color: color-mix(in srgb, var(--text-accent) 78%, #8d5bff 22%);
+  color: #ffffff;
+}
+
+.kanban-todo-row-link {
+  background: transparent;
+  border: 0;
+  color: var(--kanban-link);
+  cursor: pointer;
+  font-size: 19px;
+  line-height: 1.35;
   margin: 0;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--kanban-link) 58%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.kanban-todo-row-link:hover {
+  color: var(--kanban-link-hover);
 }
 
 @media (max-width: 768px) {
@@ -702,7 +732,12 @@
     grid-template-columns: 1fr;
   }
 
-  .kanban-todo-lane-grid {
-    grid-template-columns: 1fr;
+  .kanban-todo-row {
+    grid-template-columns: 20px minmax(0, 1fr);
+    padding: 10px;
+  }
+
+  .kanban-todo-row-link {
+    font-size: 16px;
   }
 }

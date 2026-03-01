@@ -79,9 +79,11 @@ milestoneTarget: 12
 9. 编辑任意目标文件后，面板会自动刷新（也可点 `Refresh`）。
 10. 点击右上角 `Milestone Kanban`（或命令 `Open Milestone Kanban`）可打开里程碑看板，按 milestone 聚合 goal 与 todo。
 11. 点击 `Kanban Todo`（或命令 `Open Kanban Todo`）可打开 Kanban 任务视图，按「一个文件一个 todo」展示。
-12. 每个 todo 文件正文建议使用单行 checkbox：`- [ ] 任务内容`。
-13. 已完成项（`- [x]`）会自动隐藏，不在视图中显示。
-14. 视图中不再展示 `Todo:` / `Done:` 前缀，直接显示 checkbox 形态内容。
+12. 在 `Kanban Todo` 页点击 `Create New Todo` 可直接新建 todo 文件（填写名称与任务内容）。
+13. 每个 todo 文件正文建议使用单行 checkbox：`- [ ] 任务内容`。
+14. 视图会同时展示未完成与已完成项，已完成项自动排在列表后部。
+15. 可在面板里直接点击 checkbox 切换 `- [ ]` / `- [x]`，并写回原文件。
+16. 视图中不展示 `Todo:` / `Done:` 前缀，直接显示 checkbox 形态内容。
 
 ## 4) 常见问题
 
