@@ -5,7 +5,7 @@ tags:
   - area/tech-notes/opencode
 ---
 
-# Planning Hub（Goal / Kanban Todo / Milestone）
+# Northstar Forge（Goal / Kanban Todo / Milestone）
 
 相关链接：[[tech-notes/obsidian-goals-plugin-implementation-plan]] [[tech-notes/README]]
 
@@ -13,7 +13,7 @@ tags:
 同时提供：
 
 - `Milestone Kanban`：集中查看某个里程碑下包含的 goal 与 markdown todo。
-- `Kanban Todo`：读取 `Kanban/` 目录中的 todo 文件（每个 todo 一个 `.md` 文件），直接在 Planning Hub 里查看未完成待办。
+- `Kanban Todo`：读取 `Kanban/` 目录中的 todo 文件（每个 todo 一个 `.md` 文件），直接在 Northstar Forge 里查看未完成待办。
 
 > 注意：`milestone`、`list`、`priority` 等字段必须写在 Markdown 文件开头的 frontmatter（Obsidian Properties）里，不能只写在正文。
 
@@ -71,7 +71,7 @@ milestoneTarget: 12
 ## 3) 如何开启和使用
 
 1. 把目标笔记放到 `Goals/`（或在插件设置里改 `Goals folder`）。
-2. 在 Obsidian 启用插件后，点击左侧 `target` 图标或命令面板执行 `Open Planning Hub`（会在主工作区以标签页打开，不再固定到右侧边栏）。
+2. 在 Obsidian 启用插件后，点击左侧 `target` 图标或命令面板执行 `Open Northstar Forge`（会在主工作区以标签页打开，不再固定到右侧边栏）。
 3. 每个 board 顶部会显示总览（Progress、On Track、At Risk、Miss）。
 4. 可拖拽 board 区块手动调整显示顺序（会持久保存）。
 5. 可点击 board 标题右侧 `Archive` 按钮，一键归档整个 board（会把该 board 下目标写入 `boardArchived: true` 并隐藏）。

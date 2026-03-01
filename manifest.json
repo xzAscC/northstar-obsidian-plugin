@@ -1,9 +1,9 @@
 {
-  "id": "goals-dashboard",
-  "name": "Planning Hub (Goals/Kanban/Todo/Milestones)",
+  "id": "Northstar",
+  "name": "Northstar Forge",
   "version": "0.3.0",
   "minAppVersion": "1.4.0",
-  "description": "Unified planning hub for goals, milestone kanban, and related markdown todos.",
+  "description": "Unified Northstar Forge workspace for goals, milestone kanban, and related markdown todos.",
   "author": "xzascc",
   "isDesktopOnly": false
 }

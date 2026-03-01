@@ -19,8 +19,8 @@ const DEFAULT_SETTINGS = {
   kanbanListOrder: ["Today"],
 };
 
-const PLANNING_HUB_COMMANDS = [
-  "Open Planning Hub",
+const NORTHSTAR_FORGE_COMMANDS = [
+  "Open Northstar Forge",
   "Open Milestone Kanban",
   "Open Kanban Todo",
 ];
@@ -44,13 +44,13 @@ class GoalsDashboardPlugin extends Plugin {
       (leaf) => new KanbanTodoDashboardView(leaf, this),
     );
 
-    this.addRibbonIcon("target", "Open Planning Hub", () => {
+    this.addRibbonIcon("target", "Open Northstar Forge", () => {
       this.activateView();
     });
 
     this.addCommand({
       id: "open-goals-dashboard",
-      name: "Open Planning Hub",
+      name: "Open Northstar Forge",
       callback: () => this.activateView(),
     });
 
@@ -534,7 +534,7 @@ class GoalsDashboardView extends ItemView {
   }
 
   getDisplayText() {
-    return "Planning Hub";
+    return "Northstar Forge";
   }
 
   getIcon() {
@@ -588,7 +588,7 @@ class GoalsDashboardView extends ItemView {
     container.addClass("goals-dashboard-view");
 
     const header = container.createDiv({ cls: "goals-dashboard-header" });
-    header.createEl("h2", { text: "Planning Hub" });
+    header.createEl("h2", { text: "Northstar Forge" });
 
     const headerActions = header.createDiv({ cls: "goals-dashboard-header-actions" });
 
@@ -1592,39 +1592,64 @@ class GoalsDashboardSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl("h2", { text: "Planning Hub settings" });
+    const folderSuggestions = getVaultFolderSuggestions(this.app.vault, [
+      DEFAULT_SETTINGS.goalsFolder,
+      DEFAULT_SETTINGS.kanbanFolder,
+      this.plugin.settings.goalsFolder,
+      this.plugin.settings.kanbanFolder,
+    ]);
+
+    containerEl.createEl("h2", { text: "Northstar Forge settings" });
 
     new Setting(containerEl)
       .setName("Goals folder")
       .setDesc("Folder that contains your goal markdown files.")
-      .addText((text) =>
+      .addText((text) => {
         text
           .setPlaceholder("Goals")
           .setValue(this.plugin.settings.goalsFolder)
           .onChange(async (value) => {
             this.plugin.settings.goalsFolder = value.trim() || DEFAULT_SETTINGS.goalsFolder;
             await this.plugin.saveSettings();
-          }),
-      );
+          });
+
+        attachSuggestions(
+          containerEl,
+          text.inputEl,
+          createDatalistId("Goals folder"),
+          folderSuggestions,
+        );
+
+        return text;
+      });
 
     new Setting(containerEl)
       .setName("Kanban folder")
       .setDesc("Folder that contains markdown kanban boards.")
-      .addText((text) =>
+      .addText((text) => {
         text
           .setPlaceholder("Kanban")
           .setValue(this.plugin.settings.kanbanFolder)
           .onChange(async (value) => {
             this.plugin.settings.kanbanFolder = normalizeFolderPath(value, DEFAULT_SETTINGS.kanbanFolder);
             await this.plugin.saveSettings();
-          }),
-      );
+          });
+
+        attachSuggestions(
+          containerEl,
+          text.inputEl,
+          createDatalistId("Kanban folder"),
+          folderSuggestions,
+        );
+
+        return text;
+      });
 
     const commandsEl = containerEl.createDiv({ cls: "planning-hub-command-list" });
     commandsEl.createEl("h3", { text: "Commands" });
-    commandsEl.createEl("p", { text: "Current Planning Hub commands:" });
+    commandsEl.createEl("p", { text: "Current Northstar Forge commands:" });
     const listEl = commandsEl.createEl("ul");
-    for (const commandName of PLANNING_HUB_COMMANDS) {
+    for (const commandName of NORTHSTAR_FORGE_COMMANDS) {
       listEl.createEl("li", { text: commandName });
     }
   }
@@ -2311,6 +2336,41 @@ function normalizeMilestone(value) {
 
 function normalizeGoalsFolder(value) {
   return normalizeFolderPath(value, "Goals");
+}
+
+function getVaultFolderSuggestions(vault, fallbackValues = []) {
+  const suggestions = [];
+
+  const pushUniquePath = (value) => {
+    const normalized = normalizeFolderPath(value, "");
+    if (!normalized || suggestions.includes(normalized)) {
+      return;
+    }
+    suggestions.push(normalized);
+  };
+
+  for (const value of Array.isArray(fallbackValues) ? fallbackValues : []) {
+    pushUniquePath(value);
+  }
+
+  const abstractFiles =
+    vault && typeof vault.getAllLoadedFiles === "function" ? vault.getAllLoadedFiles() : [];
+
+  for (const entry of abstractFiles) {
+    if (!entry) {
+      continue;
+    }
+
+    if (Array.isArray(entry.children)) {
+      pushUniquePath(entry.path);
+    }
+
+    if (entry.parent) {
+      pushUniquePath(entry.parent.path);
+    }
+  }
+
+  return suggestions.sort((left, right) => left.localeCompare(right));
 }
 
 function normalizeFolderPath(value, fallback = "") {
