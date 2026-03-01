@@ -9,6 +9,7 @@ const {
 } = require("obsidian");
 
 const VIEW_TYPE_GOALS_DASHBOARD = "goals-dashboard-view";
+const VIEW_TYPE_MILESTONE_DASHBOARD = "goals-milestone-view";
 
 const DEFAULT_SETTINGS = {
   goalsFolder: "Goals",
@@ -24,6 +25,11 @@ class GoalsDashboardPlugin extends Plugin {
       (leaf) => new GoalsDashboardView(leaf, this),
     );
 
+    this.registerView(
+      VIEW_TYPE_MILESTONE_DASHBOARD,
+      (leaf) => new MilestoneDashboardView(leaf, this),
+    );
+
     this.addRibbonIcon("target", "Open Goals Dashboard", () => {
       this.activateView();
     });
@@ -34,11 +40,22 @@ class GoalsDashboardPlugin extends Plugin {
       callback: () => this.activateView(),
     });
 
+    this.addRibbonIcon("flag", "Open Milestones", () => {
+      this.activateMilestoneView();
+    });
+
+    this.addCommand({
+      id: "open-milestones-dashboard",
+      name: "Open Milestones",
+      callback: () => this.activateMilestoneView(),
+    });
+
     this.addSettingTab(new GoalsDashboardSettingTab(this.app, this));
   }
 
   onunload() {
     this.app.workspace.detachLeavesOfType(VIEW_TYPE_GOALS_DASHBOARD);
+    this.app.workspace.detachLeavesOfType(VIEW_TYPE_MILESTONE_DASHBOARD);
   }
 
   async activateView() {
@@ -50,6 +67,22 @@ class GoalsDashboardPlugin extends Plugin {
       leaf = workspace.getLeaf(true);
       await leaf.setViewState({
         type: VIEW_TYPE_GOALS_DASHBOARD,
+        active: true,
+      });
+    }
+
+    workspace.revealLeaf(leaf);
+  }
+
+  async activateMilestoneView() {
+    const { workspace } = this.app;
+    const existingLeaves = workspace.getLeavesOfType(VIEW_TYPE_MILESTONE_DASHBOARD);
+    let leaf = existingLeaves.find((candidate) => !isSidebarLeaf(workspace, candidate));
+
+    if (!leaf) {
+      leaf = workspace.getLeaf(true);
+      await leaf.setViewState({
+        type: VIEW_TYPE_MILESTONE_DASHBOARD,
         active: true,
       });
     }
@@ -109,6 +142,8 @@ class GoalsDashboardPlugin extends Plugin {
         unit: frontmatter.unit ?? "",
         due: frontmatter.due ?? "",
         status: frontmatter.status ?? "on-track",
+        milestone: frontmatter.milestone ?? frontmatter.task ?? "",
+        milestoneDue: frontmatter.milestoneDue ?? frontmatter.taskDue ?? "",
         percent,
         archived: isTruthy(frontmatter.archived),
         boardArchived: isBoardArchived(frontmatter),
@@ -181,6 +216,75 @@ class GoalsDashboardPlugin extends Plugin {
     });
 
     return this.app.vault.create(filePath, content);
+  }
+
+  async getGoalTodos(file) {
+    const raw = await this.app.vault.cachedRead(file);
+    return extractTodoItems(raw);
+  }
+
+  async getMilestones() {
+    const goals = await this.getGoals();
+    const activeGoals = goals.filter((goal) => !isGoalArchived(goal));
+    if (activeGoals.length === 0) {
+      return [];
+    }
+
+    const goalsWithTodos = await Promise.all(
+      activeGoals.map(async (goal) => {
+        const todos = await this.getGoalTodos(goal.file);
+        return { ...goal, todos };
+      }),
+    );
+
+    const grouped = new Map();
+    for (const goal of goalsWithTodos) {
+      const milestoneName = normalizeMilestone(goal.milestone);
+      if (!grouped.has(milestoneName)) {
+        grouped.set(milestoneName, {
+          name: milestoneName,
+          due: String(goal.milestoneDue ?? "").trim(),
+          goals: [],
+          todos: [],
+          todoOpen: 0,
+          todoDone: 0,
+        });
+      }
+
+      const bucket = grouped.get(milestoneName);
+      bucket.goals.push(goal);
+
+      if (!bucket.due) {
+        bucket.due = String(goal.milestoneDue ?? "").trim();
+      }
+
+      for (const todo of goal.todos) {
+        bucket.todos.push({
+          goalTitle: goal.title,
+          goalFile: goal.file,
+          text: todo.text,
+          done: todo.done,
+        });
+
+        if (todo.done) {
+          bucket.todoDone += 1;
+        } else {
+          bucket.todoOpen += 1;
+        }
+      }
+    }
+
+    const milestones = Array.from(grouped.values());
+    milestones.sort((left, right) => {
+      const dueCompare = compareDue(left.due, right.due);
+      if (dueCompare !== 0) {
+        return dueCompare;
+      }
+
+      return String(left.name).localeCompare(String(right.name));
+    });
+
+    return milestones;
   }
 }
 
@@ -274,6 +378,14 @@ class GoalsDashboardView extends ItemView {
       text: "Refresh",
     });
     refreshButton.addEventListener("click", () => this.render());
+
+    const milestoneButton = headerActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "Milestones",
+    });
+    milestoneButton.addEventListener("click", async () => {
+      await this.plugin.activateMilestoneView();
+    });
 
     const goals = await this.plugin.getGoals();
     const boardOptions = getUniqueGoalValues(goals, "board");
@@ -754,6 +866,191 @@ class GoalsDashboardView extends ItemView {
   }
 }
 
+class MilestoneDashboardView extends ItemView {
+  constructor(leaf, plugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.refreshTimer = null;
+  }
+
+  getViewType() {
+    return VIEW_TYPE_MILESTONE_DASHBOARD;
+  }
+
+  getDisplayText() {
+    return "Milestones";
+  }
+
+  getIcon() {
+    return "flag";
+  }
+
+  async onOpen() {
+    this.registerEvent(
+      this.app.metadataCache.on("changed", () => {
+        this.queueRefresh();
+      }),
+    );
+
+    this.registerEvent(
+      this.app.vault.on("modify", () => {
+        this.queueRefresh();
+      }),
+    );
+
+    await this.render();
+  }
+
+  async onClose() {
+    if (this.refreshTimer) {
+      window.clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+  }
+
+  queueRefresh() {
+    if (this.refreshTimer) {
+      window.clearTimeout(this.refreshTimer);
+    }
+
+    this.refreshTimer = window.setTimeout(() => {
+      this.render();
+    }, 150);
+  }
+
+  async openGoalInRightPane(file) {
+    const leaf = this.app.workspace.getLeaf("split");
+    await leaf.openFile(file, { active: true });
+    this.app.workspace.revealLeaf(leaf);
+  }
+
+  async render() {
+    const container = this.containerEl.children[1];
+    container.empty();
+    container.addClass("goals-dashboard-view");
+    container.addClass("milestones-dashboard-view");
+
+    const header = container.createDiv({ cls: "goals-dashboard-header" });
+    header.createEl("h2", { text: "Milestones" });
+
+    const headerActions = header.createDiv({ cls: "goals-dashboard-header-actions" });
+    const goalsButton = headerActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "Goals",
+    });
+    goalsButton.addEventListener("click", async () => {
+      await this.plugin.activateView();
+    });
+
+    const refreshButton = headerActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "Refresh",
+    });
+    refreshButton.addEventListener("click", () => this.render());
+
+    container.createEl("p", {
+      cls: "milestones-description",
+      text: "Milestone Kanban will be implemented later. This page currently shows milestone-linked goals and markdown todos.",
+    });
+
+    const milestones = await this.plugin.getMilestones();
+    if (milestones.length === 0) {
+      container.createEl("p", {
+        cls: "goals-dashboard-empty",
+        text: "No milestone data found in active goals.",
+      });
+      return;
+    }
+
+    const list = container.createDiv({ cls: "milestone-list" });
+    for (const milestone of milestones) {
+      const card = list.createDiv({ cls: "milestone-card" });
+      const top = card.createDiv({ cls: "milestone-card-top" });
+      top.createEl("h3", {
+        cls: "milestone-card-title",
+        text: milestone.name,
+      });
+
+      const stats = top.createDiv({ cls: "milestone-card-stats" });
+      stats.createEl("span", {
+        cls: "milestone-stat-chip",
+        text: `Goals ${milestone.goals.length}`,
+      });
+      stats.createEl("span", {
+        cls: "milestone-stat-chip",
+        text: `Todo ${milestone.todoOpen}/${milestone.todoOpen + milestone.todoDone}`,
+      });
+
+      if (milestone.due) {
+        stats.createEl("span", {
+          cls: "milestone-stat-chip",
+          text: `Due ${milestone.due}`,
+        });
+      }
+
+      const body = card.createDiv({ cls: "milestone-card-body" });
+      const goalsCol = body.createDiv({ cls: "milestone-column" });
+      goalsCol.createEl("h4", {
+        cls: "milestone-column-title",
+        text: "Goals",
+      });
+
+      const goalsList = goalsCol.createEl("ul", { cls: "milestone-goal-list" });
+      for (const goal of milestone.goals) {
+        const item = goalsList.createEl("li", { cls: "milestone-goal-item" });
+        const openButton = item.createEl("button", {
+          cls: "milestone-goal-link",
+          text: `${goal.title} (${goal.percent}%)`,
+        });
+
+        openButton.addEventListener("click", async () => {
+          await this.openGoalInRightPane(goal.file);
+        });
+
+        item.createEl("span", {
+          cls: "milestone-goal-board",
+          text: goal.board,
+        });
+      }
+
+      const todoCol = body.createDiv({ cls: "milestone-column" });
+      todoCol.createEl("h4", {
+        cls: "milestone-column-title",
+        text: "Todo",
+      });
+
+      if (milestone.todos.length === 0) {
+        todoCol.createEl("p", {
+          cls: "milestone-todo-empty",
+          text: "No markdown todos in linked goals.",
+        });
+      } else {
+        const todoList = todoCol.createEl("ul", { cls: "milestone-todo-list" });
+        for (const todo of milestone.todos.slice(0, 12)) {
+          const todoItem = todoList.createEl("li", {
+            cls: todo.done ? "milestone-todo-item is-done" : "milestone-todo-item",
+          });
+          todoItem.createSpan({
+            cls: "milestone-todo-text",
+            text: todo.text,
+          });
+          todoItem.createSpan({
+            cls: "milestone-todo-goal",
+            text: todo.goalTitle,
+          });
+        }
+
+        if (milestone.todos.length > 12) {
+          todoCol.createEl("p", {
+            cls: "milestone-todo-more",
+            text: `+${milestone.todos.length - 12} more todos`,
+          });
+        }
+      }
+    }
+  }
+}
+
 class GoalsDashboardSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
@@ -1005,6 +1302,11 @@ function normalizeBoard(value) {
   return board || "Uncategorized";
 }
 
+function normalizeMilestone(value) {
+  const milestone = String(value ?? "").trim();
+  return milestone || "Unscheduled Milestone";
+}
+
 function normalizeGoalsFolder(value) {
   return String(value ?? "")
     .trim()
@@ -1064,9 +1366,9 @@ function buildGoalTemplate(values) {
     `due: ${toYamlString(values.due)}`,
     "status: on-track",
     'owner: ""',
-    'task: "Main Task"',
-    'taskDue: ""',
-    "taskPercent: 0",
+    'milestone: "Main Milestone"',
+    'milestoneDue: ""',
+    "milestonePercent: 0",
     "boardArchived: false",
     "---",
     "",
@@ -1229,6 +1531,44 @@ function getStatusBucket(status) {
   }
 
   return "miss";
+}
+
+function extractTodoItems(markdown) {
+  const lines = String(markdown ?? "").split(/\r?\n/);
+  const todos = [];
+
+  for (const line of lines) {
+    const match = line.match(/^\s*[-*]\s+\[([ xX])\]\s+(.+)$/);
+    if (!match) {
+      continue;
+    }
+
+    todos.push({
+      done: String(match[1]).toLowerCase() === "x",
+      text: String(match[2] ?? "").trim(),
+    });
+  }
+
+  return todos;
+}
+
+function compareDue(leftDue, rightDue) {
+  const left = String(leftDue ?? "").trim();
+  const right = String(rightDue ?? "").trim();
+
+  if (left && right) {
+    return left.localeCompare(right);
+  }
+
+  if (left) {
+    return -1;
+  }
+
+  if (right) {
+    return 1;
+  }
+
+  return 0;
 }
 
 module.exports = GoalsDashboardPlugin;

@@ -10,6 +10,7 @@ tags:
 相关链接：[[tech-notes/obsidian-goals-plugin-implementation-plan]] [[tech-notes/README]]
 
 这个插件会扫描 `Goals/` 下 `type: goal` 的笔记，并渲染成类似 Leantime 的 Goal 卡片板。
+同时提供一个 Milestones 页面，用于集中查看某个里程碑下包含的 goal 与 markdown todo。
 
 ## 1) 目标文件格式
 
@@ -28,9 +29,9 @@ due: 2026-12-31
 status: on-track
 
 owner: xu
-task: 全年任务
-taskDue: 2027-01-01
-taskPercent: 0
+milestone: 全年里程碑
+milestoneDue: 2027-01-01
+milestonePercent: 0
 
 boardArchived: false
 ---
@@ -53,13 +54,13 @@ boardArchived: false
 - `Status`：读取 `status`，如 `on-track` / `at-risk` / `off-track`。
 - 评论数：统计 `## Comments` 下的无序列表项。
 - 右侧圆形头像：读取 `owner` 或 `assignee` 的首字母。
-- 底部任务条：`task`、`taskDue`、`taskPercent`。
+- 底部里程碑条：`milestone`、`milestoneDue`、`milestonePercent`。
 
-`taskPercent` 也可不写，改用这组字段自动算：
+`milestonePercent` 也可不写，改用这组字段自动算：
 
 ```yaml
-taskCurrent: 3
-taskTarget: 12
+milestoneCurrent: 3
+milestoneTarget: 12
 ```
 
 ## 3) 如何开启和使用
@@ -73,6 +74,8 @@ taskTarget: 12
 7. 每张卡片可直接修改基础字段（`title`、`board`、`metric`、`start/current/target`、`due`、`status`），无需打开原始 Markdown。
 8. 在 dashboard 顶部点击 `Create New Goal` 可直接新建目标文件（填写名称、board、metric、target、due）。
 9. 编辑任意目标文件后，面板会自动刷新（也可点 `Refresh`）。
+10. 点击右上角 `Milestones`（或命令 `Open Milestones`）可打开里程碑页，查看 milestone->goal->todo 关系。
+11. 里程碑看板（拖拽列、状态流转等）后续再实现，当前先提供聚合视图。
 
 ## 4) 常见问题
 

@@ -403,6 +403,116 @@
   padding: 4px 8px;
 }
 
+.milestones-dashboard-view {
+  --milestone-card-bg: color-mix(in srgb, var(--background-secondary) 86%, #d5f0e4 14%);
+  --milestone-card-border: color-mix(in srgb, var(--background-modifier-border) 70%, #78bca8 30%);
+}
+
+.milestones-description {
+  color: var(--text-muted);
+  margin: 2px 0 14px;
+}
+
+.milestone-list {
+  display: grid;
+  gap: 12px;
+}
+
+.milestone-card {
+  background: var(--milestone-card-bg);
+  border: 1px solid var(--milestone-card-border);
+  border-radius: 14px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.07);
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.milestone-card-top {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.milestone-card-title {
+  margin: 0;
+}
+
+.milestone-card-stats {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.milestone-stat-chip {
+  background: color-mix(in srgb, var(--background-primary) 84%, #67b2a4 16%);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+}
+
+.milestone-card-body {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.milestone-column {
+  border: 1px dashed color-mix(in srgb, var(--milestone-card-border) 75%, transparent);
+  border-radius: 10px;
+  min-width: 0;
+  padding: 10px;
+}
+
+.milestone-column-title {
+  margin: 0 0 8px;
+}
+
+.milestone-goal-list,
+.milestone-todo-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.milestone-goal-item,
+.milestone-todo-item {
+  display: grid;
+  gap: 2px;
+}
+
+.milestone-goal-link {
+  background: transparent;
+  border: 0;
+  color: var(--text-normal);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0;
+  text-align: left;
+}
+
+.milestone-goal-link:hover {
+  color: var(--text-accent);
+  text-decoration: underline;
+}
+
+.milestone-goal-board,
+.milestone-todo-goal,
+.milestone-todo-more,
+.milestone-todo-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.milestone-todo-item.is-done .milestone-todo-text {
+  opacity: 0.7;
+  text-decoration: line-through;
+}
+
 @media (max-width: 768px) {
   .board-summary {
     grid-template-columns: 1fr;
@@ -423,5 +533,14 @@
   .goal-quick-edit-row,
   .goal-quick-edit-row-numbers {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .milestone-card-top {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .milestone-card-body {
+    grid-template-columns: 1fr;
   }
 }
