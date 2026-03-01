@@ -12,7 +12,7 @@ tags:
 这个插件会扫描 `Goals/` 下 `type: goal` 的笔记，并渲染成类似 Leantime 的 Goal 卡片板。
 同时提供：
 
-- `Northstar Homepage`：启动 Obsidian 自动打开主页，包含 iCloud Calendar（支持 `.ics` 只读订阅 + CalDAV 写回创建事件）和 Daily List（本地时间每天 05:00 自动重置）。
+- `Northstar Homepage`：启动 Obsidian 自动打开主页，包含 Local Calendar（点击日期打开对应日报；若缺失会按模板创建）和 Daily List（本地时间每天 05:00 自动重置）。
 - `Milestone Kanban`：集中查看某个里程碑下包含的 goal 与 markdown todo。
 - `Kanban Todo`：读取 `Kanban/` 目录中的 todo 文件（每个 todo 一个 `.md` 文件），直接在 Northstar Forge 里查看未完成待办。
 
@@ -81,9 +81,9 @@ milestoneTarget: 12
 8. 在 dashboard 顶部点击 `Create New Goal` 可直接新建目标文件（填写名称、board、metric、target、due）。
 9. 编辑任意目标文件后，面板会自动刷新（也可点 `Refresh`）。
 10. 启用插件并打开 Obsidian 时，默认会自动打开 `Northstar Homepage`（可在设置中关闭）。
-11. 在设置里填写 `iCloud calendar ICS URL` 后，主页会显示未来 7 天日程。
-12. 若要写回 iCloud（日历创建事件），再配置 `iCloud CalDAV base URL`、`iCloud Apple ID`、`iCloud app-specific password`（必须是 Apple 应用专用密码，不是 Apple ID 登录密码）。
-13. 配置完成后，主页右上角可用 `New Event` 直接创建事件到 iCloud 日历。
+11. 主页 `Local Calendar` 支持 `Month / Week` 视图切换，并可通过左右按钮切换月份或周。
+12. 点击任意日期会打开对应日报；若文件不存在，会按 `Daily template path` 自动创建。
+13. 可在设置里指定 `Local calendar daily root` 与 `Daily template path`。
 14. 主页 `Daily List` 会在本地时间每天 `05:00` 自动重置，模版可在设置里配置（每行一条）。
 15. 点击右上角 `Milestone Kanban`（或命令 `Open Milestone Kanban`）可打开里程碑看板，按 milestone 聚合 goal 与 todo。
 16. 点击 `Kanban Todo`（或命令 `Open Kanban Todo`）可打开 Kanban 任务视图，按「一个文件一个 todo」展示。

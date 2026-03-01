@@ -5,11 +5,9 @@ const VIEW_TYPE_KANBAN_TODO_DASHBOARD = "goals-kanban-todo-view";
 
 const DEFAULT_SETTINGS = {
   openHomepageOnStartup: true,
-  homeCalendarIcsUrl: "",
-  homeCaldavBaseUrl: "https://caldav.icloud.com",
-  homeCaldavUsername: "",
-  homeCaldavPassword: "",
-  homeCaldavCalendarUrl: "",
+  homeCalendarDailyRoot: "Daily",
+  homeCalendarDailyTemplatePath: "Daily/templates/daily-template.md",
+  homeCalendarLookaheadDays: 7,
   homeListTemplate: "Plan top task\nReview calendar\nMove body",
   homeDailyListState: {
     resetKey: "",

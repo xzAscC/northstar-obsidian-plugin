@@ -39,78 +39,70 @@ class GoalsDashboardSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("iCloud calendar ICS URL")
-      .setDesc("Paste your iCloud Calendar subscription URL (.ics).")
-      .addText((text) =>
-        text
-          .setPlaceholder("https://pXX-caldav.icloud.com/published/2/...")
-          .setValue(this.plugin.settings.homeCalendarIcsUrl)
-          .onChange(async (value) => {
-            this.plugin.settings.homeCalendarIcsUrl = String(value ?? "").trim();
-            this.plugin.homeCalendarCache = {
-              url: "",
-              fetchedAt: 0,
-              events: [],
-              error: "",
-            };
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("iCloud CalDAV base URL")
-      .setDesc("Used for write-back. Usually https://caldav.icloud.com")
-      .addText((text) =>
-        text
-          .setPlaceholder("https://caldav.icloud.com")
-          .setValue(this.plugin.settings.homeCaldavBaseUrl)
-          .onChange(async (value) => {
-            this.plugin.settings.homeCaldavBaseUrl = String(value ?? "").trim();
-            this.plugin.settings.homeCaldavCalendarUrl = "";
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("iCloud Apple ID")
-      .setDesc("Apple ID used for CalDAV Basic Auth.")
-      .addText((text) =>
-        text
-          .setPlaceholder("name@example.com")
-          .setValue(this.plugin.settings.homeCaldavUsername)
-          .onChange(async (value) => {
-            this.plugin.settings.homeCaldavUsername = String(value ?? "").trim();
-            await this.plugin.saveSettings();
-          }),
-      );
-
-    new Setting(containerEl)
-      .setName("iCloud app-specific password")
-      .setDesc("Create one at appleid.apple.com, then paste it here. Stored in local plugin data.")
+      .setName("Local calendar daily root")
+      .setDesc("Daily notes root folder used by homepage calendar.")
       .addText((text) => {
         text
-          .setPlaceholder("xxxx-xxxx-xxxx-xxxx")
-          .setValue(this.plugin.settings.homeCaldavPassword)
+          .setPlaceholder("Daily")
+          .setValue(this.plugin.settings.homeCalendarDailyRoot)
           .onChange(async (value) => {
-            this.plugin.settings.homeCaldavPassword = String(value ?? "");
+            this.plugin.settings.homeCalendarDailyRoot = normalizeFolderPath(
+              value,
+              DEFAULT_SETTINGS.homeCalendarDailyRoot,
+            );
             await this.plugin.saveSettings();
           });
 
-        text.inputEl.type = "password";
-        text.inputEl.autocomplete = "off";
+        attachSuggestions(
+          containerEl,
+          text.inputEl,
+          createDatalistId("Local calendar root"),
+          folderSuggestions,
+        );
+
         return text;
       });
 
     new Setting(containerEl)
-      .setName("iCloud CalDAV calendar URL")
-      .setDesc("Optional. Leave empty to auto-discover writable calendars.")
+      .setName("Daily template path")
+      .setDesc("Used when a daily note does not exist yet.")
+      .addText((text) => {
+        text
+          .setPlaceholder("Daily/templates/daily-template.md")
+          .setValue(this.plugin.settings.homeCalendarDailyTemplatePath)
+          .onChange(async (value) => {
+            this.plugin.settings.homeCalendarDailyTemplatePath =
+              String(value ?? "").trim() || DEFAULT_SETTINGS.homeCalendarDailyTemplatePath;
+            await this.plugin.saveSettings();
+          });
+
+        attachSuggestions(
+          containerEl,
+          text.inputEl,
+          createDatalistId("Daily template path"),
+          this.app.vault
+            .getMarkdownFiles()
+            .map((file) => file.path),
+        );
+
+        return text;
+      });
+
+    new Setting(containerEl)
+      .setName("Calendar lookahead days")
+      .setDesc("How many upcoming days are shown on homepage calendar.")
       .addText((text) =>
         text
-          .setPlaceholder("https://caldav.icloud.com/.../calendars/.../")
-          .setValue(this.plugin.settings.homeCaldavCalendarUrl)
+          .setPlaceholder("7")
+          .setValue(String(this.plugin.settings.homeCalendarLookaheadDays))
           .onChange(async (value) => {
-            this.plugin.settings.homeCaldavCalendarUrl = String(value ?? "").trim();
+            const parsed = Number(value);
+            const normalized = Number.isFinite(parsed)
+              ? Math.max(1, Math.min(31, Math.round(parsed)))
+              : DEFAULT_SETTINGS.homeCalendarLookaheadDays;
+            this.plugin.settings.homeCalendarLookaheadDays = normalized;
             await this.plugin.saveSettings();
+            this.display();
           }),
       );
 

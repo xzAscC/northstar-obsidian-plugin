@@ -110,6 +110,7 @@ const {
   normalizeDateString,
   normalizeFolderPath,
   normalizeGoalsFolder,
+  formatDateHeading,
   normalizeHomeDailyListState,
   normalizeHomeListTemplate,
   normalizeKanbanListName,
@@ -129,6 +130,56 @@ const { GoalsDashboardView } = requirePluginModule("src/views/goals-dashboard-vi
 const { HomeDashboardView } = requirePluginModule("src/views/home-dashboard-view");
 const { KanbanTodoDashboardView } = requirePluginModule("src/views/kanban-todo-dashboard-view");
 const { MilestoneDashboardView } = requirePluginModule("src/views/milestone-dashboard-view");
+
+async function ensureFolderExists(vault, folderPath) {
+  const normalizedPath = String(folderPath ?? "")
+    .trim()
+    .replace(/^\/+|\/+$/g, "");
+  if (!normalizedPath) {
+    return;
+  }
+
+  const parts = normalizedPath.split("/").filter(Boolean);
+  let currentPath = "";
+  for (const part of parts) {
+    currentPath = currentPath ? `${currentPath}/${part}` : part;
+    if (!vault.getAbstractFileByPath(currentPath)) {
+      await vault.createFolder(currentPath);
+    }
+  }
+}
+
+function formatDateKey(date) {
+  const year = String(date.getFullYear()).padStart(4, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateKey(dateKey) {
+  const matched = String(dateKey ?? "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!matched) {
+    return null;
+  }
+
+  const year = Number(matched[1]);
+  const month = Number(matched[2]);
+  const day = Number(matched[3]);
+  const parsed = new Date(year, month - 1, day, 0, 0, 0, 0);
+  if (!Number.isFinite(parsed.getTime())) {
+    return null;
+  }
+
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return parsed;
+}
 
 class GoalsDashboardPlugin extends Plugin {
   async onload() {
@@ -284,11 +335,17 @@ class GoalsDashboardPlugin extends Plugin {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
 
     this.settings.openHomepageOnStartup = this.settings.openHomepageOnStartup !== false;
-    this.settings.homeCalendarIcsUrl = String(this.settings.homeCalendarIcsUrl ?? "").trim();
-    this.settings.homeCaldavBaseUrl = String(this.settings.homeCaldavBaseUrl ?? "").trim();
-    this.settings.homeCaldavUsername = String(this.settings.homeCaldavUsername ?? "").trim();
-    this.settings.homeCaldavPassword = String(this.settings.homeCaldavPassword ?? "");
-    this.settings.homeCaldavCalendarUrl = String(this.settings.homeCaldavCalendarUrl ?? "").trim();
+    this.settings.homeCalendarDailyRoot = normalizeFolderPath(
+      this.settings.homeCalendarDailyRoot,
+      DEFAULT_SETTINGS.homeCalendarDailyRoot,
+    );
+    this.settings.homeCalendarDailyTemplatePath =
+      String(this.settings.homeCalendarDailyTemplatePath ?? "").trim() ||
+      DEFAULT_SETTINGS.homeCalendarDailyTemplatePath;
+    const lookaheadDays = Number(this.settings.homeCalendarLookaheadDays);
+    this.settings.homeCalendarLookaheadDays = Number.isFinite(lookaheadDays)
+      ? Math.max(1, Math.min(31, Math.round(lookaheadDays)))
+      : DEFAULT_SETTINGS.homeCalendarLookaheadDays;
     this.settings.homeListTemplate = normalizeHomeListTemplate(
       this.settings.homeListTemplate,
       DEFAULT_SETTINGS.homeListTemplate,
@@ -383,6 +440,207 @@ class GoalsDashboardPlugin extends Plugin {
       items,
     };
     await this.saveSettings();
+  }
+
+  async getHomeDailyMetrics() {
+    const lookbackDays = 14;
+    const metrics = [
+      {
+        id: "learningHours",
+        label: "学习时间",
+        aliases: ["learningHours", "学习时间"],
+        kind: "number",
+      },
+      {
+        id: "exerciseDone",
+        label: "锻炼情况",
+        aliases: ["exerciseDone", "锻炼情况"],
+        kind: "binary",
+      },
+      {
+        id: "sleepHours",
+        label: "睡觉时间",
+        aliases: ["sleepHours", "睡觉时间"],
+        kind: "number",
+      },
+      {
+        id: "masturbation",
+        label: "撸管",
+        aliases: ["masturbation", "撸管"],
+        kind: "binary",
+      },
+    ];
+
+    const parseMetricValue = (rawValue, kind) => {
+      const numeric = Number(rawValue);
+      if (!Number.isFinite(numeric)) {
+        return null;
+      }
+
+      if (kind === "binary") {
+        return numeric > 0 ? 1 : 0;
+      }
+
+      return Number(numeric.toFixed(2));
+    };
+
+    const parseDateFromBasename = (basename) => {
+      const matched = String(basename ?? "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!matched) {
+        return null;
+      }
+
+      const year = Number(matched[1]);
+      const month = Number(matched[2]);
+      const day = Number(matched[3]);
+      return new Date(year, month - 1, day, 0, 0, 0, 0);
+    };
+
+    const endDate = new Date();
+    endDate.setHours(0, 0, 0, 0);
+    const startDate = new Date(endDate.getTime() - (lookbackDays - 1) * 24 * 60 * 60 * 1000);
+
+    const allFiles = this.app.vault.getMarkdownFiles();
+    const samplesByMetric = new Map(metrics.map((metric) => [metric.id, []]));
+
+    for (const file of allFiles) {
+      if (!String(file.path ?? "").startsWith("Daily/")) {
+        continue;
+      }
+
+      const noteDate = parseDateFromBasename(file.basename);
+      if (!noteDate || noteDate < startDate || noteDate > endDate) {
+        continue;
+      }
+
+      const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+      if (!frontmatter) {
+        continue;
+      }
+
+      const date = file.basename;
+      for (const metric of metrics) {
+        const key = metric.aliases.find((alias) =>
+          Object.prototype.hasOwnProperty.call(frontmatter, alias),
+        );
+        if (!key) {
+          continue;
+        }
+
+        const value = parseMetricValue(frontmatter[key], metric.kind);
+        if (value === null) {
+          continue;
+        }
+
+        samplesByMetric.get(metric.id).push({
+          date,
+          value,
+        });
+      }
+    }
+
+    return {
+      lookbackDays,
+      metrics: metrics.map((metric) => {
+        const samples = samplesByMetric
+          .get(metric.id)
+          .sort((left, right) => String(left.date).localeCompare(String(right.date)));
+        const values = samples.map((item) => item.value);
+        const latest = values.length > 0 ? values[values.length - 1] : null;
+        const average =
+          values.length > 0 ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2)) : null;
+        return {
+          ...metric,
+          samples,
+          latest,
+          average,
+        };
+      }),
+    };
+  }
+
+  getDailyNotePathByDate(date) {
+    const root = normalizeFolderPath(
+      this.settings.homeCalendarDailyRoot,
+      DEFAULT_SETTINGS.homeCalendarDailyRoot,
+    );
+    const year = String(date.getFullYear()).padStart(4, "0");
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const monthFolder = `${year}-${month}`;
+    return `${root}/${year}/${monthFolder}/${year}-${month}-${day}.md`;
+  }
+
+  getLocalCalendarDays() {
+    const totalDays = Number.isFinite(this.settings.homeCalendarLookaheadDays)
+      ? this.settings.homeCalendarLookaheadDays
+      : DEFAULT_SETTINGS.homeCalendarLookaheadDays;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const items = [];
+
+    for (let offset = 0; offset < totalDays; offset += 1) {
+      const date = new Date(today.getTime() + offset * 24 * 60 * 60 * 1000);
+      const path = this.getDailyNotePathByDate(date);
+      const existing = this.app.vault.getAbstractFileByPath(path);
+      const exists = Boolean(existing && !Array.isArray(existing.children) && existing.extension === "md");
+
+      items.push({
+        dateKey: formatDateKey(date),
+        dateLabel: formatDateHeading(date),
+        path,
+        exists,
+        isToday: offset === 0,
+      });
+    }
+
+    return items;
+  }
+
+  async readDailyTemplate() {
+    const templatePath =
+      String(this.settings.homeCalendarDailyTemplatePath ?? "").trim() ||
+      DEFAULT_SETTINGS.homeCalendarDailyTemplatePath;
+    const templateFile = this.app.vault.getAbstractFileByPath(templatePath);
+    if (!templateFile || Array.isArray(templateFile.children) || templateFile.extension !== "md") {
+      throw new Error("daily-template-not-found");
+    }
+
+    return this.app.vault.cachedRead(templateFile);
+  }
+
+  async openOrCreateDailyNoteByDateKey(dateKey) {
+    const date = parseDateKey(dateKey);
+    if (!date) {
+      throw new Error("invalid-calendar-date");
+    }
+
+    const targetPath = this.getDailyNotePathByDate(date);
+    const existing = this.app.vault.getAbstractFileByPath(targetPath);
+    const isMarkdownFile = Boolean(
+      existing && !Array.isArray(existing.children) && existing.extension === "md",
+    );
+
+    let targetFile = existing;
+    if (!isMarkdownFile) {
+      if (existing) {
+        throw new Error("daily-path-conflict");
+      }
+
+      const templateContent = await this.readDailyTemplate();
+      const folderPath = targetPath.split("/").slice(0, -1).join("/");
+      await ensureFolderExists(this.app.vault, folderPath);
+      targetFile = await this.app.vault.create(targetPath, templateContent);
+    }
+
+    const leaf = this.app.workspace.getLeaf(true);
+    await leaf.openFile(targetFile, { active: true });
+    this.app.workspace.revealLeaf(leaf);
+
+    return {
+      file: targetFile,
+      created: !isMarkdownFile,
+    };
   }
 
   async getIcloudCalendarEvents() {
