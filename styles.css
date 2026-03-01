@@ -754,6 +754,276 @@
   white-space: nowrap;
 }
 
+.northstar-homepage-view {
+  --home-card-bg: color-mix(in srgb, var(--background-secondary) 88%, #d7ebe2 12%);
+  --home-card-border: color-mix(in srgb, var(--background-modifier-border) 76%, #7bb39f 24%);
+}
+
+.northstar-homepage-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.northstar-homepage-card {
+  background: var(--home-card-bg);
+  border: 1px solid var(--home-card-border);
+  border-radius: 14px;
+  display: grid;
+  gap: 10px;
+  min-height: 240px;
+  padding: 12px;
+}
+
+.northstar-homepage-card-top {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.northstar-homepage-card-top h3 {
+  margin: 0;
+}
+
+.northstar-homepage-card-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.northstar-calendar-toolbar {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.northstar-calendar-mode-switch {
+  background: color-mix(in srgb, var(--background-primary) 85%, #ffffff 15%);
+  border: 1px solid color-mix(in srgb, var(--home-card-border) 72%, transparent);
+  border-radius: 999px;
+  display: inline-flex;
+  padding: 2px;
+}
+
+.northstar-calendar-mode-btn {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 5px 10px;
+}
+
+.northstar-calendar-mode-btn.is-active {
+  background: color-mix(in srgb, var(--text-accent) 72%, #6eb8a5 28%);
+  color: #ffffff;
+}
+
+.northstar-calendar-nav {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.northstar-calendar-nav-btn {
+  align-items: center;
+  background: color-mix(in srgb, var(--background-primary) 85%, #ffffff 15%);
+  border: 1px solid color-mix(in srgb, var(--home-card-border) 72%, transparent);
+  border-radius: 999px;
+  cursor: pointer;
+  display: inline-flex;
+  font-weight: 700;
+  justify-content: center;
+  min-height: 30px;
+  min-width: 30px;
+  padding: 0;
+}
+
+.northstar-calendar-title {
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.northstar-calendar-weekdays {
+  color: var(--text-muted);
+  display: grid;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 4px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  text-align: center;
+}
+
+.northstar-calendar-grid {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.northstar-calendar-cell {
+  align-content: center;
+  background: color-mix(in srgb, var(--background-primary) 89%, #ffffff 11%);
+  border: 1px solid color-mix(in srgb, var(--home-card-border) 74%, transparent);
+  border-radius: 10px;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+  justify-items: center;
+  min-height: 52px;
+  padding: 6px 4px;
+}
+
+.northstar-calendar-cell.is-outside-scope {
+  opacity: 0.45;
+}
+
+.northstar-calendar-cell.is-missing {
+  border-style: dashed;
+}
+
+.northstar-calendar-cell.is-today {
+  border-color: color-mix(in srgb, var(--text-accent) 60%, #6eb8a5 40%);
+}
+
+.northstar-calendar-cell.is-selected {
+  background: color-mix(in srgb, var(--text-accent) 22%, #f2aa9e 78%);
+  border-color: color-mix(in srgb, var(--text-accent) 66%, #d98f82 34%);
+}
+
+.northstar-calendar-day-number {
+  color: var(--text-normal);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.northstar-calendar-day-state {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.northstar-calendar-cell.is-existing .northstar-calendar-day-state {
+  color: color-mix(in srgb, var(--text-accent) 64%, #3b8f78 36%);
+}
+
+.northstar-calendar-group {
+  display: grid;
+  gap: 4px;
+}
+
+.northstar-calendar-date {
+  color: var(--text-normal);
+  margin: 0;
+}
+
+.northstar-calendar-event {
+  align-items: baseline;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 70px minmax(0, 1fr);
+}
+
+.northstar-calendar-time {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.northstar-daily-list-add {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.northstar-daily-list {
+  display: grid;
+  gap: 8px;
+}
+
+.northstar-daily-item {
+  align-items: center;
+  background: color-mix(in srgb, var(--background-primary) 88%, #ffffff 12%);
+  border: 1px solid color-mix(in srgb, var(--home-card-border) 75%, transparent);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 8px 10px;
+}
+
+.northstar-daily-item.is-done .northstar-daily-item-text {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.northstar-daily-item-text {
+  font-size: 14px;
+}
+
+.northstar-daily-remove {
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
+.northstar-homepage-metrics-card {
+  min-height: 280px;
+}
+
+.northstar-metric-list {
+  display: grid;
+  gap: 10px;
+}
+
+.northstar-metric-item {
+  background: color-mix(in srgb, var(--background-primary) 88%, #ffffff 12%);
+  border: 1px solid color-mix(in srgb, var(--home-card-border) 75%, transparent);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.northstar-metric-meta {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.northstar-metric-name {
+  font-size: 14px;
+}
+
+.northstar-metric-stats {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.northstar-metric-sparkline {
+  align-items: end;
+  display: grid;
+  gap: 4px;
+  grid-auto-columns: minmax(6px, 1fr);
+  grid-auto-flow: column;
+  height: 52px;
+}
+
+.northstar-metric-bar {
+  background: linear-gradient(180deg, #51a68b, #2f6d9a);
+  border-radius: 4px 4px 2px 2px;
+  min-height: 4px;
+}
+
+.northstar-settings-textarea {
+  width: 100%;
+}
+
 @media (max-width: 768px) {
   .board-summary {
     grid-template-columns: 1fr;
@@ -792,5 +1062,22 @@
 
   .kanban-todo-row-link {
     font-size: 16px;
+  }
+
+  .northstar-calendar-event {
+    grid-template-columns: 60px minmax(0, 1fr);
+  }
+
+  .northstar-calendar-title {
+    font-size: 13px;
+  }
+
+  .northstar-calendar-cell {
+    min-height: 46px;
+    padding: 4px 2px;
+  }
+
+  .northstar-calendar-day-number {
+    font-size: 13px;
   }
 }
