@@ -503,6 +503,20 @@ class GoalsDashboardPlugin extends Plugin {
       this.settings.boardOrder = [];
     }
 
+    if (!Array.isArray(this.settings.milestoneOrder)) {
+      this.settings.milestoneOrder = [];
+    }
+
+    this.settings.milestoneOrder = this.settings.milestoneOrder
+      .map((name) => normalizeMilestone(name))
+      .filter((name, index, list) => name && list.indexOf(name) === index);
+
+    this.settings.milestoneArchived = Array.isArray(this.settings.milestoneArchived)
+      ? this.settings.milestoneArchived
+          .map((name) => normalizeMilestone(name))
+          .filter((name, index, list) => name && list.indexOf(name) === index)
+      : [];
+
     const archivedLists = Array.isArray(this.settings.kanbanArchivedLists)
       ? this.settings.kanbanArchivedLists
           .map((name) => normalizeKanbanListName(name))
@@ -1471,6 +1485,53 @@ class GoalsDashboardPlugin extends Plugin {
     };
   }
 
+  isMilestoneArchived(name) {
+    const milestoneName = normalizeMilestone(name);
+    return this.settings.milestoneArchived.includes(milestoneName);
+  }
+
+  async archiveMilestone(name) {
+    const milestoneName = normalizeMilestone(name);
+    if (this.settings.milestoneArchived.includes(milestoneName)) {
+      return {
+        name: milestoneName,
+        archived: false,
+      };
+    }
+
+    this.settings.milestoneOrder = [...this.settings.milestoneOrder, milestoneName].filter(
+      (item, index, list) => item && list.indexOf(item) === index,
+    );
+    this.settings.milestoneArchived = [...this.settings.milestoneArchived, milestoneName].filter(
+      (item, index, list) => item && list.indexOf(item) === index,
+    );
+    await this.saveSettings();
+
+    return {
+      name: milestoneName,
+      archived: true,
+    };
+  }
+
+  async unarchiveMilestone(name) {
+    const milestoneName = normalizeMilestone(name);
+    const nextArchived = this.settings.milestoneArchived.filter((item) => item !== milestoneName);
+    if (nextArchived.join("\n") === this.settings.milestoneArchived.join("\n")) {
+      return {
+        name: milestoneName,
+        unarchived: false,
+      };
+    }
+
+    this.settings.milestoneArchived = nextArchived;
+    await this.saveSettings();
+
+    return {
+      name: milestoneName,
+      unarchived: true,
+    };
+  }
+
   async getGoalTodos(file) {
     const raw = await this.app.vault.cachedRead(file);
     return extractTodoItems(raw);
@@ -1624,6 +1685,10 @@ class GoalsDashboardPlugin extends Plugin {
   }
 
   async updateKanbanTodoText(file, text) {
+    await this.updateCheckboxTodoText(file, 0, text);
+  }
+
+  async updateCheckboxTodoText(file, todoIndex, text) {
     const line = String(text ?? "").replace(/\r?\n+/g, " ").trim();
     if (!line) {
       throw new Error("missing-todo-text");
@@ -1631,10 +1696,17 @@ class GoalsDashboardPlugin extends Plugin {
 
     const raw = await this.app.vault.cachedRead(file);
     const lines = String(raw ?? "").split(/\r?\n/);
+    const targetIndex = Number.isFinite(todoIndex) ? Math.max(0, Math.floor(todoIndex)) : 0;
+    let checkboxIndex = 0;
 
     for (let index = 0; index < lines.length; index += 1) {
       const match = lines[index].match(/^(\s*[-*]\s+\[[ xX]\]\s+).+$/);
       if (!match) {
+        continue;
+      }
+
+      if (checkboxIndex !== targetIndex) {
+        checkboxIndex += 1;
         continue;
       }
 
@@ -1647,13 +1719,24 @@ class GoalsDashboardPlugin extends Plugin {
   }
 
   async setKanbanTodoDone(file, done) {
+    await this.setCheckboxTodoDone(file, 0, done);
+  }
+
+  async setCheckboxTodoDone(file, todoIndex, done) {
     const raw = await this.app.vault.cachedRead(file);
     const lines = String(raw ?? "").split(/\r?\n/);
     const targetState = done ? "x" : " ";
+    const targetIndex = Number.isFinite(todoIndex) ? Math.max(0, Math.floor(todoIndex)) : 0;
+    let checkboxIndex = 0;
 
     for (let index = 0; index < lines.length; index += 1) {
       const match = lines[index].match(/^(\s*[-*]\s+)\[([ xX])\](\s+.+)$/);
       if (!match) {
+        continue;
+      }
+
+      if (checkboxIndex !== targetIndex) {
+        checkboxIndex += 1;
         continue;
       }
 
@@ -1705,6 +1788,8 @@ class GoalsDashboardPlugin extends Plugin {
           goalTitle: goal.title,
           goalFile: goal.file,
           text: todo.text,
+          todoFile: goal.file,
+          todoIndex: Number.isFinite(todo.index) ? todo.index : 0,
           done: todo.done,
           source: "goal",
         });
@@ -1730,6 +1815,8 @@ class GoalsDashboardPlugin extends Plugin {
         goalTitle: String(todo.goal ?? "").trim() || todo.name,
         goalFile: todo.file,
         text: todo.text,
+        todoFile: todo.file,
+        todoIndex: 0,
         done: todo.done,
         source: "kanban",
       });

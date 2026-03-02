@@ -17,6 +17,8 @@ const DEFAULT_SETTINGS = {
   goalsFolder: "Goals",
   kanbanFolder: "Kanban",
   boardOrder: [],
+  milestoneOrder: [],
+  milestoneArchived: [],
   kanbanListOrder: ["Today"],
   kanbanArchivedLists: [],
 };

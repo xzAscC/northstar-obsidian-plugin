@@ -561,6 +561,7 @@ function extractTodoItems(markdown) {
     }
 
     todos.push({
+      index: todos.length,
       done: String(match[1]).toLowerCase() === "x",
       text: String(match[2] ?? "").trim(),
     });
