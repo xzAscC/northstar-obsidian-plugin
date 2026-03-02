@@ -212,7 +212,6 @@ function needsKanbanFrontmatterHydration(frontmatter) {
     "goal",
     "priority",
     "due",
-    "schedule",
     "tags",
     "planHours",
     "hoursLeft",
@@ -233,7 +232,6 @@ function parseKanbanTodoMetadata(frontmatter) {
     priority: normalizePriority(fm.priority),
     due: normalizeDateString(fm.due),
     tags: normalizeTagList(fm.tags),
-    schedule: String(fm.schedule ?? fm.schdule ?? "").trim(),
     planHours,
     hoursLeft,
   };
@@ -259,10 +257,6 @@ function buildTodoMetadataLabels(todo) {
 
   if (todo.due) {
     labels.push(`Due: ${todo.due}`);
-  }
-
-  if (todo.schedule) {
-    labels.push(`Schedule: ${todo.schedule}`);
   }
 
   if (Number.isFinite(todo.hoursLeft) && Number.isFinite(todo.planHours)) {
@@ -410,7 +404,6 @@ function buildKanbanTodoTemplate(payload) {
   const goal = String(payload.goal ?? "").trim();
   const priority = normalizePriority(payload.priority);
   const due = normalizeDateString(payload.due);
-  const schedule = String(payload.schedule ?? "").trim();
   const tags = normalizeTagList(payload.tags);
   const planHours = parseHoursValue(payload.planHours);
   const hoursLeft = parseHoursValue(payload.hoursLeft);
@@ -422,7 +415,6 @@ function buildKanbanTodoTemplate(payload) {
     `goal: ${toYamlString(goal)}`,
     `priority: ${toYamlString(priority)}`,
     `due: ${toYamlString(due)}`,
-    `schedule: ${toYamlString(schedule)}`,
     `tags: ${toYamlArray(tags)}`,
     `planHours: ${Number.isFinite(planHours) ? planHours : 0}`,
     `hoursLeft: ${Number.isFinite(hoursLeft) ? hoursLeft : Number.isFinite(planHours) ? planHours : 0}`,

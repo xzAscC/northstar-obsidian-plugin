@@ -118,6 +118,7 @@ const {
   normalizeMilestone,
   normalizePriority,
   normalizeTagList,
+  parseHoursValue,
   parseHomeListTemplate,
   parseKanbanTodoMetadata,
   parseSingleTodoFile,
@@ -1385,19 +1386,14 @@ class GoalsDashboardPlugin extends Plugin {
   async createKanbanTodoFile(payload) {
     const name = String(payload.name ?? "").trim();
     const text = String(payload.text ?? "").trim();
-    const list = normalizeKanbanListName(payload.list);
+    const requestedList = String(payload.list ?? "").trim();
+    const defaultList =
+      this.settings.kanbanListOrder.find((listName) => !this.isKanbanListArchived(listName)) || "Today";
+    const list = normalizeKanbanListName(requestedList || defaultList);
     const milestone = String(payload.milestone ?? "").trim();
 
     if (!name) {
       throw new Error("missing-todo-name");
-    }
-
-    if (!text) {
-      throw new Error("missing-todo-text");
-    }
-
-    if (!milestone) {
-      throw new Error("missing-todo-milestone");
     }
 
     const kanbanFolder = normalizeFolderPath(this.settings.kanbanFolder, DEFAULT_SETTINGS.kanbanFolder);
@@ -1412,13 +1408,12 @@ class GoalsDashboardPlugin extends Plugin {
     const sanitizedBaseName = sanitizeFileName(name) || `todo-${Date.now()}`;
     const filePath = getUniquePath(this.app.vault, kanbanFolder, sanitizedBaseName);
     const content = buildKanbanTodoTemplate({
-      text,
+      text: text || name,
       list,
       milestone,
       goal: payload.goal,
       priority: payload.priority,
       due: payload.due,
-      schedule: payload.schedule,
       tags: payload.tags,
       planHours: payload.planHours,
       hoursLeft: payload.hoursLeft,
@@ -1673,6 +1668,14 @@ class GoalsDashboardPlugin extends Plugin {
       const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
       const metadata = parseKanbanTodoMetadata(frontmatter);
 
+      if (
+        frontmatter &&
+        (Object.prototype.hasOwnProperty.call(frontmatter, "schedule") ||
+          Object.prototype.hasOwnProperty.call(frontmatter, "schdule"))
+      ) {
+        await this.removeLegacyKanbanTodoFields(file);
+      }
+
       if (needsKanbanFrontmatterHydration(frontmatter)) {
         await this.ensureKanbanTodoFrontmatter(file, metadata);
       }
@@ -1688,7 +1691,6 @@ class GoalsDashboardPlugin extends Plugin {
         priority: metadata.priority,
         due: metadata.due,
         tags: metadata.tags,
-        schedule: metadata.schedule,
         planHours: metadata.planHours,
         hoursLeft: metadata.hoursLeft,
       });
@@ -1714,6 +1716,18 @@ class GoalsDashboardPlugin extends Plugin {
     });
   }
 
+  async removeLegacyKanbanTodoFields(file) {
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      if (Object.prototype.hasOwnProperty.call(fm, "schedule")) {
+        delete fm.schedule;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(fm, "schdule")) {
+        delete fm.schdule;
+      }
+    });
+  }
+
   async ensureKanbanTodoFrontmatter(file, metadata) {
     await this.app.fileManager.processFrontMatter(file, (fm) => {
       if (!Object.prototype.hasOwnProperty.call(fm, "list")) {
@@ -1734,10 +1748,6 @@ class GoalsDashboardPlugin extends Plugin {
 
       if (!Object.prototype.hasOwnProperty.call(fm, "due")) {
         fm.due = normalizeDateString(metadata.due);
-      }
-
-      if (!Object.prototype.hasOwnProperty.call(fm, "schedule")) {
-        fm.schedule = String(metadata.schedule ?? "").trim();
       }
 
       if (!Object.prototype.hasOwnProperty.call(fm, "tags")) {
@@ -1777,6 +1787,40 @@ class GoalsDashboardPlugin extends Plugin {
 
         if (key === "due") {
           fm.due = normalizeDateString(value);
+          continue;
+        }
+
+        if (key === "milestone") {
+          fm.milestone = normalizeMilestone(value);
+          continue;
+        }
+
+        if (key === "goal") {
+          fm.goal = String(value ?? "").trim();
+          continue;
+        }
+
+        if (key === "tags") {
+          fm.tags = normalizeTagList(value);
+          continue;
+        }
+
+        if (key === "planHours") {
+          const parsedPlanHours = parseHoursValue(value);
+          fm.planHours = Number.isFinite(parsedPlanHours) ? parsedPlanHours : 0;
+          if (!Object.prototype.hasOwnProperty.call(fm, "hoursLeft")) {
+            fm.hoursLeft = fm.planHours;
+          }
+          continue;
+        }
+
+        if (key === "hoursLeft") {
+          const parsedHoursLeft = parseHoursValue(value);
+          fm.hoursLeft = Number.isFinite(parsedHoursLeft)
+            ? parsedHoursLeft
+            : Number.isFinite(fm.planHours)
+              ? fm.planHours
+              : 0;
           continue;
         }
 
