@@ -7,7 +7,7 @@ tags:
 
 # Northstar Forge（Goal / Kanban Todo / Milestone）
 
-相关链接：[[tech-notes/obsidian-goals-plugin-implementation-plan]] [[tech-notes/README]]
+相关链接：[[TechNotes/obsidian-goals-plugin-implementation-plan]] [[TechNotes/README]]
 
 这个插件会扫描 `Goals/` 下 `type: goal` 的笔记，并渲染成类似 Leantime 的 Goal 卡片板。
 同时提供：

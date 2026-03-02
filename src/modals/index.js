@@ -163,7 +163,7 @@ class CreateKanbanTodoModal extends Modal {
     const form = contentEl.createEl("form", { cls: "goals-create-form" });
 
     const nameInput = this.createInputField(form, {
-      label: "Todo Name",
+      label: "Title",
       placeholder: "Inbox",
       value: this.defaults.name,
       required: true,
@@ -173,7 +173,6 @@ class CreateKanbanTodoModal extends Modal {
       label: "Todo",
       placeholder: "Follow up plugin issue #12",
       value: this.defaults.text,
-      required: true,
     });
 
     const listInput = this.createInputFieldWithSuggestions(form, {
@@ -181,20 +180,20 @@ class CreateKanbanTodoModal extends Modal {
       placeholder: "Today",
       value: this.defaults.list,
       suggestions: this.defaults.listOptions,
-      required: true,
     });
 
-    const milestoneInput = this.createInputField(form, {
+    const milestoneInput = this.createInputFieldWithSuggestions(form, {
       label: "Milestone",
       placeholder: "Q1 Shipping",
       value: this.defaults.milestone,
-      required: true,
+      suggestions: this.defaults.milestoneOptions,
     });
 
-    const goalInput = this.createInputField(form, {
+    const goalInput = this.createInputFieldWithSuggestions(form, {
       label: "Goal",
       placeholder: "Optional linked goal",
       value: this.defaults.goal,
+      suggestions: this.defaults.goalOptions,
     });
 
     const priorityInput = this.createInputFieldWithSuggestions(form, {
@@ -210,16 +209,11 @@ class CreateKanbanTodoModal extends Modal {
       value: this.defaults.due,
     });
 
-    const scheduleInput = this.createInputField(form, {
-      label: "Schedule",
-      placeholder: "Mon-Fri 09:00-11:00",
-      value: this.defaults.schedule,
-    });
-
-    const tagsInput = this.createInputField(form, {
+    const tagsInput = this.createInputFieldWithSuggestions(form, {
       label: "Tags",
       placeholder: "research, writing",
       value: this.defaults.tags,
+      suggestions: this.defaults.tagOptions,
     });
 
     const planHoursInput = this.createInputField(form, {
@@ -267,7 +261,6 @@ class CreateKanbanTodoModal extends Modal {
         goal: goalInput.value,
         priority: priorityInput.value,
         due: dueInput.value,
-        schedule: scheduleInput.value,
         tags: tagsInput.value,
         planHours: planHoursInput.value,
         hoursLeft: hoursLeftInput.value,

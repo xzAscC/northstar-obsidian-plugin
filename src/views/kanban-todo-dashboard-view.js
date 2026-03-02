@@ -123,15 +123,9 @@ class KanbanTodoDashboardView extends ItemView {
     });
     refreshButton.addEventListener("click", () => this.render());
 
-    const todos = await this.plugin.getKanbanBoards();
+    const [todos, goals] = await Promise.all([this.plugin.getKanbanBoards(), this.plugin.getGoals()]);
     const todosByList = groupBy(todos, (todo) => todo.list);
-    const milestoneOptions = Array.from(
-      new Set(
-        todos
-          .map((todo) => String(todo.milestone || "").trim())
-          .filter(Boolean),
-      ),
-    );
+    const { goalOptions, milestoneOptions, tagOptions } = this.collectTodoValueOptions(todos, goals);
     const listsInView = normalizeKanbanListOrder(
       this.plugin.settings.kanbanListOrder,
       Array.from(todosByList.keys()),
@@ -257,7 +251,9 @@ class KanbanTodoDashboardView extends ItemView {
 
         this.createTodoQuickEditFields(body, todo, {
           listOptions: activeLists,
+          goalOptions,
           milestoneOptions,
+          tagOptions,
         });
       }
     }
@@ -373,7 +369,28 @@ class KanbanTodoDashboardView extends ItemView {
       },
     });
 
-    this.createTodoQuickEditInput(rowThree, {
+    this.createTodoQuickEditInputWithSuggestions(rowThree, {
+      label: "Goal",
+      value: String(todo.goal || ""),
+      placeholder: "Linked goal",
+      suggestions: valueOptions.goalOptions,
+      onCommit: async (value) => {
+        await this.saveTodoField(todo.file, "goal", String(value || "").trim());
+      },
+    });
+
+    this.createTodoQuickEditInputWithSuggestions(rowThree, {
+      label: "Tags",
+      value: Array.isArray(todo.tags) ? todo.tags.join(", ") : String(todo.tags || ""),
+      placeholder: "research, writing",
+      suggestions: valueOptions.tagOptions,
+      onCommit: async (value) => {
+        await this.saveTodoField(todo.file, "tags", String(value || "").trim());
+      },
+    });
+
+    const rowFour = quickEdit.createDiv({ cls: "kanban-todo-quick-edit-row" });
+    this.createTodoQuickEditInput(rowFour, {
       label: "Due",
       type: "date",
       value: String(todo.due || ""),
@@ -383,7 +400,19 @@ class KanbanTodoDashboardView extends ItemView {
       },
     });
 
-    this.createTodoQuickEditInput(rowThree, {
+    this.createTodoQuickEditInput(rowFour, {
+      label: "Plan Hours",
+      type: "number",
+      step: "0.5",
+      min: "0",
+      value: Number.isFinite(todo.planHours) ? formatHoursValue(todo.planHours) : "",
+      placeholder: "0",
+      onCommit: async (value) => {
+        await this.saveTodoField(todo.file, "planHours", String(value || "").trim());
+      },
+    });
+
+    this.createTodoQuickEditInput(rowFour, {
       label: "Hours Left",
       type: "number",
       step: "0.5",
@@ -394,6 +423,40 @@ class KanbanTodoDashboardView extends ItemView {
         await this.saveTodoField(todo.file, "hoursLeft", String(value || "").trim());
       },
     });
+  }
+
+  collectTodoValueOptions(todos, goals) {
+    const uniqueSorted = (values) =>
+      Array.from(
+        new Set(
+          (Array.isArray(values) ? values : [])
+            .map((value) => String(value ?? "").trim())
+            .filter(Boolean),
+        ),
+      ).sort((left, right) => left.localeCompare(right));
+
+    const goalOptions = uniqueSorted([
+      ...(Array.isArray(goals) ? goals.map((goal) => goal.title) : []),
+      ...(Array.isArray(todos) ? todos.map((todo) => todo.goal) : []),
+    ]);
+
+    const milestoneOptions = uniqueSorted([
+      ...(Array.isArray(goals) ? goals.map((goal) => goal.milestone) : []),
+      ...(Array.isArray(this.plugin.settings.milestoneOrder)
+        ? this.plugin.settings.milestoneOrder
+        : []),
+      ...(Array.isArray(todos) ? todos.map((todo) => todo.milestone) : []),
+    ]);
+
+    const tagOptions = uniqueSorted(
+      Array.isArray(todos) ? todos.flatMap((todo) => (Array.isArray(todo.tags) ? todo.tags : [])) : [],
+    );
+
+    return {
+      goalOptions,
+      milestoneOptions,
+      tagOptions,
+    };
   }
 
   createTodoQuickEditInput(container, config) {
@@ -516,11 +579,13 @@ class KanbanTodoDashboardView extends ItemView {
   }
 
   async createTodoFromDashboard() {
+    const [todos, goals] = await Promise.all([this.plugin.getKanbanBoards(), this.plugin.getGoals()]);
     const allTodoLists = normalizeKanbanListOrder(
       this.plugin.settings.kanbanListOrder,
-      (await this.plugin.getKanbanBoards()).map((todo) => todo.list),
+      todos.map((todo) => todo.list),
     );
     const todoLists = allTodoLists.filter((listName) => !this.plugin.isKanbanListArchived(listName));
+    const valueOptions = this.collectTodoValueOptions(todos, goals);
 
     const payload = await this.promptCreateTodo({
       name: "",
@@ -528,11 +593,13 @@ class KanbanTodoDashboardView extends ItemView {
       list: todoLists[0] || "Today",
       listOptions: todoLists,
       milestone: "",
+      milestoneOptions: valueOptions.milestoneOptions,
       goal: "",
+      goalOptions: valueOptions.goalOptions,
       priority: "medium",
       due: "",
-      schedule: "",
       tags: "",
+      tagOptions: valueOptions.tagOptions,
       planHours: "",
       hoursLeft: "",
     });
