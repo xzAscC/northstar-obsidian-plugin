@@ -1,7 +1,14 @@
 const { ItemView, Notice, setIcon } = require("obsidian");
 
 const { VIEW_TYPE_KANBAN_TODO_DASHBOARD } = require("../constants");
-const { buildTodoMetadataLabels, groupBy, normalizeKanbanListOrder } = require("../utils");
+const {
+  attachSuggestions,
+  createDatalistId,
+  formatHoursValue,
+  groupBy,
+  normalizeKanbanListOrder,
+  normalizePriority,
+} = require("../utils");
 const { CreateKanbanListModal, CreateKanbanTodoModal } = require("../modals");
 
 class KanbanTodoDashboardView extends ItemView {
@@ -118,6 +125,13 @@ class KanbanTodoDashboardView extends ItemView {
 
     const todos = await this.plugin.getKanbanBoards();
     const todosByList = groupBy(todos, (todo) => todo.list);
+    const milestoneOptions = Array.from(
+      new Set(
+        todos
+          .map((todo) => String(todo.milestone || "").trim())
+          .filter(Boolean),
+      ),
+    );
     const listsInView = normalizeKanbanListOrder(
       this.plugin.settings.kanbanListOrder,
       Array.from(todosByList.keys()),
@@ -235,22 +249,16 @@ class KanbanTodoDashboardView extends ItemView {
 
         const openButton = body.createEl("button", {
           cls: "kanban-todo-row-link",
-          text: todo.text || todo.name,
+          text: todo.name,
         });
         openButton.addEventListener("click", async () => {
           await this.openBoardInRightPane(todo.file);
         });
 
-        const metadata = buildTodoMetadataLabels(todo);
-        if (metadata.length > 0) {
-          const metadataRow = body.createDiv({ cls: "kanban-todo-meta" });
-          for (const label of metadata) {
-            metadataRow.createSpan({
-              cls: "kanban-todo-meta-chip",
-              text: label,
-            });
-          }
-        }
+        this.createTodoQuickEditFields(body, todo, {
+          listOptions: activeLists,
+          milestoneOptions,
+        });
       }
     }
 
@@ -314,6 +322,196 @@ class KanbanTodoDashboardView extends ItemView {
         console.error(error);
         new Notice("Failed to update todo status.");
       }
+    }
+  }
+
+  createTodoQuickEditFields(container, todo, valueOptions = {}) {
+    const quickEdit = container.createDiv({ cls: "kanban-todo-quick-edit" });
+
+    const rowOne = quickEdit.createDiv({ cls: "kanban-todo-quick-edit-row" });
+    this.createTodoQuickEditInput(rowOne, {
+      label: "Todo",
+      value: String(todo.text || ""),
+      placeholder: "Todo text",
+      onCommit: async (value) => {
+        await this.saveTodoText(todo.file, value);
+      },
+    });
+
+    const rowTwo = quickEdit.createDiv({ cls: "kanban-todo-quick-edit-row" });
+    this.createTodoQuickEditInputWithSuggestions(rowTwo, {
+      label: "List",
+      value: String(todo.list || "Today"),
+      placeholder: "Today",
+      suggestions: valueOptions.listOptions,
+      onCommit: async (value) => {
+        await this.saveTodoField(todo.file, "list", String(value || "").trim());
+      },
+    });
+
+    this.createTodoQuickEditSelect(rowTwo, {
+      label: "Priority",
+      value: normalizePriority(todo.priority),
+      options: [
+        { value: "high", label: "High" },
+        { value: "medium", label: "Medium" },
+        { value: "low", label: "Low" },
+      ],
+      onCommit: async (value) => {
+        await this.saveTodoField(todo.file, "priority", value);
+      },
+    });
+
+    const rowThree = quickEdit.createDiv({ cls: "kanban-todo-quick-edit-row" });
+    this.createTodoQuickEditInputWithSuggestions(rowThree, {
+      label: "Milestone",
+      value: String(todo.milestone || ""),
+      placeholder: "2026W9",
+      suggestions: valueOptions.milestoneOptions,
+      onCommit: async (value) => {
+        await this.saveTodoField(todo.file, "milestone", String(value || "").trim());
+      },
+    });
+
+    this.createTodoQuickEditInput(rowThree, {
+      label: "Due",
+      type: "date",
+      value: String(todo.due || ""),
+      placeholder: "",
+      onCommit: async (value) => {
+        await this.saveTodoField(todo.file, "due", String(value || "").trim());
+      },
+    });
+
+    this.createTodoQuickEditInput(rowThree, {
+      label: "Hours Left",
+      type: "number",
+      step: "0.5",
+      min: "0",
+      value: Number.isFinite(todo.hoursLeft) ? formatHoursValue(todo.hoursLeft) : "",
+      placeholder: "0",
+      onCommit: async (value) => {
+        await this.saveTodoField(todo.file, "hoursLeft", String(value || "").trim());
+      },
+    });
+  }
+
+  createTodoQuickEditInput(container, config) {
+    const field = container.createDiv({ cls: "kanban-todo-quick-edit-field" });
+    field.createEl("label", {
+      cls: "kanban-todo-quick-edit-label",
+      text: config.label,
+    });
+
+    const input = field.createEl("input", {
+      cls: "kanban-todo-quick-edit-input",
+      type: config.type || "text",
+      value: String(config.value ?? ""),
+      placeholder: config.placeholder || "",
+    });
+    if (config.step != null) {
+      input.step = String(config.step);
+    }
+    if (config.min != null) {
+      input.min = String(config.min);
+    }
+    if (config.max != null) {
+      input.max = String(config.max);
+    }
+
+    const commit = async () => {
+      await this.tryCommitTodoQuickEdit(config.onCommit, input.value);
+    };
+
+    input.addEventListener("change", commit);
+    input.addEventListener("keydown", async (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+
+      event.preventDefault();
+      await commit();
+    });
+  }
+
+  createTodoQuickEditInputWithSuggestions(container, config) {
+    const field = container.createDiv({ cls: "kanban-todo-quick-edit-field" });
+    field.createEl("label", {
+      cls: "kanban-todo-quick-edit-label",
+      text: config.label,
+    });
+
+    const input = field.createEl("input", {
+      cls: "kanban-todo-quick-edit-input",
+      type: config.type || "text",
+      value: String(config.value ?? ""),
+      placeholder: config.placeholder || "",
+    });
+
+    const datalistId = createDatalistId(config.label);
+    attachSuggestions(field, input, datalistId, config.suggestions);
+
+    const commit = async () => {
+      await this.tryCommitTodoQuickEdit(config.onCommit, input.value);
+    };
+
+    input.addEventListener("change", commit);
+    input.addEventListener("keydown", async (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+
+      event.preventDefault();
+      await commit();
+    });
+  }
+
+  createTodoQuickEditSelect(container, config) {
+    const field = container.createDiv({ cls: "kanban-todo-quick-edit-field" });
+    field.createEl("label", {
+      cls: "kanban-todo-quick-edit-label",
+      text: config.label,
+    });
+
+    const select = field.createEl("select", {
+      cls: "kanban-todo-quick-edit-input",
+    });
+
+    for (const option of config.options) {
+      const optionEl = select.createEl("option", {
+        text: option.label,
+        value: option.value,
+      });
+      optionEl.selected = option.value === config.value;
+    }
+
+    select.addEventListener("change", async () => {
+      await this.tryCommitTodoQuickEdit(config.onCommit, select.value);
+    });
+  }
+
+  async saveTodoField(file, key, value) {
+    await this.plugin.updateKanbanTodoFields(file, { [key]: value });
+  }
+
+  async saveTodoText(file, value) {
+    await this.plugin.updateKanbanTodoText(file, value);
+  }
+
+  async tryCommitTodoQuickEdit(commitFn, value) {
+    try {
+      await commitFn(value);
+      await this.render();
+    } catch (error) {
+      if (error && error.message === "missing-todo-text") {
+        new Notice("Please provide todo content.");
+      } else if (error && error.message === "todo-checkbox-not-found") {
+        new Notice("No checkbox todo found in this file.");
+      } else {
+        console.error(error);
+        new Notice("Failed to update todo property.");
+      }
+      await this.render();
     }
   }
 

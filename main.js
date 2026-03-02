@@ -181,6 +181,63 @@ function parseDateKey(dateKey) {
   return parsed;
 }
 
+function listDateKeysInRange(startDateKey, endDateKey) {
+  const startDate = parseDateKey(startDateKey);
+  const endDate = parseDateKey(endDateKey);
+  if (!startDate || !endDate) {
+    throw new Error("invalid-calendar-date");
+  }
+
+  if (startDate.getTime() > endDate.getTime()) {
+    throw new Error("invalid-calendar-range");
+  }
+
+  const dateKeys = [];
+  const cursor = new Date(startDate.getTime());
+  while (cursor.getTime() <= endDate.getTime()) {
+    dateKeys.push(formatDateKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+    cursor.setHours(0, 0, 0, 0);
+  }
+
+  return dateKeys;
+}
+
+function normalizeHomeCalendarTaskItem(rawItem) {
+  const text = String(rawItem?.text ?? "").replace(/\s+/g, " ").trim();
+  if (!text) {
+    return null;
+  }
+
+  return {
+    text,
+    done: Boolean(rawItem?.done),
+  };
+}
+
+function normalizeHomeCalendarTasksByDate(rawState) {
+  if (!rawState || typeof rawState !== "object" || Array.isArray(rawState)) {
+    return {};
+  }
+
+  const normalized = {};
+  for (const [dateKey, taskList] of Object.entries(rawState)) {
+    if (!parseDateKey(dateKey)) {
+      continue;
+    }
+
+    const items = Array.isArray(taskList)
+      ? taskList.map((item) => normalizeHomeCalendarTaskItem(item)).filter(Boolean)
+      : [];
+
+    if (items.length > 0) {
+      normalized[dateKey] = items;
+    }
+  }
+
+  return normalized;
+}
+
 class GoalsDashboardPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
@@ -351,6 +408,9 @@ class GoalsDashboardPlugin extends Plugin {
       DEFAULT_SETTINGS.homeListTemplate,
     );
     this.settings.homeDailyListState = normalizeHomeDailyListState(this.settings.homeDailyListState);
+    this.settings.homeCalendarTasksByDate = normalizeHomeCalendarTasksByDate(
+      this.settings.homeCalendarTasksByDate,
+    );
 
     if (!Array.isArray(this.settings.boardOrder)) {
       this.settings.boardOrder = [];
@@ -627,6 +687,102 @@ class GoalsDashboardPlugin extends Plugin {
     return items;
   }
 
+  async getHomeCalendarTasksByDate(dateKey) {
+    if (!parseDateKey(dateKey)) {
+      throw new Error("invalid-calendar-date");
+    }
+
+    const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
+    return Array.isArray(source[dateKey]) ? [...source[dateKey]] : [];
+  }
+
+  getHomeCalendarTaskSummaryByDate() {
+    const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
+    const summary = {};
+
+    for (const [dateKey, tasks] of Object.entries(source)) {
+      const total = tasks.length;
+      const done = tasks.filter((task) => task.done).length;
+      summary[dateKey] = {
+        total,
+        done,
+      };
+    }
+
+    return summary;
+  }
+
+  async addHomeCalendarTask(dateKey, text) {
+    return this.addHomeCalendarTaskRange(dateKey, dateKey, text);
+  }
+
+  async addHomeCalendarTaskRange(startDateKey, endDateKey, text) {
+    const dateKeys = listDateKeysInRange(startDateKey, endDateKey);
+    const normalizedTask = normalizeHomeCalendarTaskItem({ text, done: false });
+    if (!normalizedTask) {
+      throw new Error("empty-calendar-task");
+    }
+
+    const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
+    const nextState = { ...source };
+    dateKeys.forEach((dateKey) => {
+      const tasks = Array.isArray(nextState[dateKey]) ? [...nextState[dateKey]] : [];
+      tasks.push({ ...normalizedTask });
+      nextState[dateKey] = tasks;
+    });
+
+    this.settings.homeCalendarTasksByDate = nextState;
+    await this.saveSettings();
+    return dateKeys.length;
+  }
+
+  async setHomeCalendarTaskDone(dateKey, index, done) {
+    if (!parseDateKey(dateKey)) {
+      throw new Error("invalid-calendar-date");
+    }
+
+    const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
+    const tasks = Array.isArray(source[dateKey]) ? [...source[dateKey]] : [];
+    if (!tasks[index]) {
+      return;
+    }
+
+    tasks[index] = {
+      text: tasks[index].text,
+      done: Boolean(done),
+    };
+
+    this.settings.homeCalendarTasksByDate = {
+      ...source,
+      [dateKey]: tasks,
+    };
+    await this.saveSettings();
+  }
+
+  async removeHomeCalendarTask(dateKey, index) {
+    if (!parseDateKey(dateKey)) {
+      throw new Error("invalid-calendar-date");
+    }
+
+    const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
+    const tasks = Array.isArray(source[dateKey])
+      ? source[dateKey].filter((_, taskIndex) => taskIndex !== index)
+      : [];
+
+    if (tasks.length > 0) {
+      this.settings.homeCalendarTasksByDate = {
+        ...source,
+        [dateKey]: tasks,
+      };
+    } else {
+      const nextState = { ...source };
+      delete nextState[dateKey];
+      this.settings.homeCalendarTasksByDate = nextState;
+    }
+
+    await this.saveSettings();
+  }
+
   async readDailyTemplate() {
     const templatePath =
       String(this.settings.homeCalendarDailyTemplatePath ?? "").trim() ||
@@ -844,7 +1000,6 @@ class GoalsDashboardPlugin extends Plugin {
         start,
         current,
         target,
-        unit: frontmatter.unit ?? "",
         due: frontmatter.due ?? "",
         status: frontmatter.status ?? "on-track",
         milestone: frontmatter.milestone ?? frontmatter.task ?? "",
@@ -1252,6 +1407,68 @@ class GoalsDashboardPlugin extends Plugin {
     });
   }
 
+  async updateKanbanTodoFields(file, updates) {
+    let nextList = "";
+
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      for (const [key, value] of Object.entries(updates || {})) {
+        if (key === "list") {
+          const listName = normalizeKanbanListName(value);
+          fm.list = listName;
+          nextList = listName;
+          continue;
+        }
+
+        if (key === "priority") {
+          fm.priority = normalizePriority(value);
+          continue;
+        }
+
+        fm[key] = value;
+      }
+    });
+
+    if (!nextList) {
+      return;
+    }
+
+    const nextListOrder = normalizeKanbanListOrder(this.settings.kanbanListOrder, [nextList]);
+    const nextArchivedLists = this.settings.kanbanArchivedLists.filter(
+      (list) => normalizeKanbanListName(list) !== nextList,
+    );
+    const listChanged = nextListOrder.join("\n") !== this.settings.kanbanListOrder.join("\n");
+    const archiveChanged = nextArchivedLists.join("\n") !== this.settings.kanbanArchivedLists.join("\n");
+
+    if (listChanged || archiveChanged) {
+      this.settings.kanbanListOrder = nextListOrder;
+      this.settings.kanbanArchivedLists = nextArchivedLists;
+      await this.saveSettings();
+    }
+  }
+
+  async updateKanbanTodoText(file, text) {
+    const line = String(text ?? "").replace(/\r?\n+/g, " ").trim();
+    if (!line) {
+      throw new Error("missing-todo-text");
+    }
+
+    const raw = await this.app.vault.cachedRead(file);
+    const lines = String(raw ?? "").split(/\r?\n/);
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const match = lines[index].match(/^(\s*[-*]\s+\[[ xX]\]\s+).+$/);
+      if (!match) {
+        continue;
+      }
+
+      lines[index] = `${match[1]}${line}`;
+      await this.app.vault.modify(file, lines.join("\n"));
+      return;
+    }
+
+    throw new Error("todo-checkbox-not-found");
+  }
+
   async setKanbanTodoDone(file, done) {
     const raw = await this.app.vault.cachedRead(file);
     const lines = String(raw ?? "").split(/\r?\n/);
@@ -1274,9 +1491,21 @@ class GoalsDashboardPlugin extends Plugin {
   async getMilestones() {
     const goals = await this.getGoals();
     const activeGoals = goals.filter((goal) => !isGoalArchived(goal));
-    if (activeGoals.length === 0) {
-      return [];
-    }
+    const grouped = new Map();
+    const ensureMilestoneBucket = (milestoneName) => {
+      if (!grouped.has(milestoneName)) {
+        grouped.set(milestoneName, {
+          name: milestoneName,
+          due: "",
+          goals: [],
+          todos: [],
+          todoOpen: 0,
+          todoDone: 0,
+        });
+      }
+
+      return grouped.get(milestoneName);
+    };
 
     const goalsWithTodos = await Promise.all(
       activeGoals.map(async (goal) => {
@@ -1285,21 +1514,9 @@ class GoalsDashboardPlugin extends Plugin {
       }),
     );
 
-    const grouped = new Map();
     for (const goal of goalsWithTodos) {
       const milestoneName = normalizeMilestone(goal.milestone);
-      if (!grouped.has(milestoneName)) {
-        grouped.set(milestoneName, {
-          name: milestoneName,
-          due: String(goal.milestoneDue ?? "").trim(),
-          goals: [],
-          todos: [],
-          todoOpen: 0,
-          todoDone: 0,
-        });
-      }
-
-      const bucket = grouped.get(milestoneName);
+      const bucket = ensureMilestoneBucket(milestoneName);
       bucket.goals.push(goal);
 
       if (!bucket.due) {
@@ -1312,6 +1529,7 @@ class GoalsDashboardPlugin extends Plugin {
           goalFile: goal.file,
           text: todo.text,
           done: todo.done,
+          source: "goal",
         });
 
         if (todo.done) {
@@ -1320,6 +1538,34 @@ class GoalsDashboardPlugin extends Plugin {
           bucket.todoOpen += 1;
         }
       }
+    }
+
+    const kanbanTodos = await this.getKanbanBoards();
+    for (const todo of kanbanTodos) {
+      const milestoneName = normalizeMilestone(todo.milestone);
+      const bucket = ensureMilestoneBucket(milestoneName);
+
+      if (!bucket.due && todo.due) {
+        bucket.due = String(todo.due).trim();
+      }
+
+      bucket.todos.push({
+        goalTitle: String(todo.goal ?? "").trim() || todo.name,
+        goalFile: todo.file,
+        text: todo.text,
+        done: todo.done,
+        source: "kanban",
+      });
+
+      if (todo.done) {
+        bucket.todoDone += 1;
+      } else {
+        bucket.todoOpen += 1;
+      }
+    }
+
+    if (grouped.size === 0) {
+      return [];
     }
 
     const milestones = Array.from(grouped.values());

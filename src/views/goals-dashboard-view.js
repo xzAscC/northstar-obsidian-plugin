@@ -126,6 +126,7 @@ class GoalsDashboardView extends ItemView {
     const goals = await this.plugin.getGoals();
     const boardOptions = getUniqueGoalValues(goals, "board");
     const metricOptions = getUniqueGoalValues(goals, "metric");
+    const milestoneOptions = getUniqueGoalValues(goals, "milestone");
 
     if (goals.length === 0) {
       container.createEl("p", {
@@ -198,7 +199,7 @@ class GoalsDashboardView extends ItemView {
           cls: "goal-progress-text",
           text: `${goal.percent}% Complete`,
         });
-        progressText.title = `${goal.current} / ${goal.target} ${goal.unit}`.trim();
+        progressText.title = `${goal.current} / ${goal.target}${goal.metric ? ` ${goal.metric}` : ""}`;
 
         const progress = card.createEl("progress", {
           cls: "goal-progress",
@@ -210,6 +211,7 @@ class GoalsDashboardView extends ItemView {
         this.createQuickEditFields(quickEdit, goal, {
           boardOptions,
           metricOptions,
+          milestoneOptions,
         });
 
         const actions = card.createDiv({ cls: "goal-actions" });
@@ -483,7 +485,27 @@ class GoalsDashboardView extends ItemView {
     });
 
     const rowThree = container.createDiv({ cls: "goal-quick-edit-row" });
-    this.createQuickEditSelect(rowThree, {
+    this.createQuickEditInputWithSuggestions(rowThree, {
+      label: "Milestone",
+      value: String(goal.milestone || ""),
+      placeholder: "Main Milestone",
+      suggestions: valueOptions.milestoneOptions,
+      onCommit: async (value) => {
+        await this.saveGoalField(goal.file, "milestone", String(value || "").trim());
+      },
+    });
+
+    this.createQuickEditInput(rowThree, {
+      label: "Milestone Due",
+      value: String(goal.milestoneDue || ""),
+      type: "date",
+      onCommit: async (value) => {
+        await this.saveGoalField(goal.file, "milestoneDue", String(value || "").trim());
+      },
+    });
+
+    const rowFour = container.createDiv({ cls: "goal-quick-edit-row" });
+    this.createQuickEditSelect(rowFour, {
       label: "Status",
       value: normalizeStatus(goal.status),
       options: [
