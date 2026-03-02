@@ -122,7 +122,49 @@ function normalizePriority(value) {
 }
 
 function normalizeDateString(value) {
-  return String(value ?? "").trim();
+  if (value instanceof Date && Number.isFinite(value.getTime())) {
+    const year = String(value.getFullYear()).padStart(4, "0");
+    const month = String(value.getMonth() + 1).padStart(2, "0");
+    const day = String(value.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  const matched = raw.match(/^(\d{1,4})-(\d{1,2})-(\d{1,2})$/);
+  if (!matched) {
+    return raw;
+  }
+
+  let year = Number(matched[1]);
+  const month = Number(matched[2]);
+  const day = Number(matched[3]);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return raw;
+  }
+
+  if (year >= 0 && year < 100) {
+    year += 2000;
+  }
+
+  const parsed = new Date(year, month - 1, day, 0, 0, 0, 0);
+  if (
+    !Number.isFinite(parsed.getTime()) ||
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return raw;
+  }
+
+  return [
+    String(year).padStart(4, "0"),
+    String(month).padStart(2, "0"),
+    String(day).padStart(2, "0"),
+  ].join("-");
 }
 
 function parseHoursValue(value) {

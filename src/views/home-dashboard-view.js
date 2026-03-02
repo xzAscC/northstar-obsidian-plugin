@@ -36,6 +36,12 @@ class HomeDashboardView extends ItemView {
       }),
     );
 
+    this.registerEvent(
+      this.app.workspace.on("file-open", () => {
+        this.queueRefresh();
+      }),
+    );
+
     this.minuteTimer = window.setInterval(async () => {
       const result = await this.plugin.ensureHomeDailyListState();
       if (result.changed) {
@@ -220,19 +226,96 @@ class HomeDashboardView extends ItemView {
     });
 
     const metrics = Array.isArray(metricsSnapshot.metrics) ? metricsSnapshot.metrics : [];
-    const hasAnySamples = metrics.some((metric) => Array.isArray(metric.samples) && metric.samples.length > 0);
-    if (!hasAnySamples) {
+    if (metrics.length === 0) {
       metricsCard.createEl("p", {
         cls: "goals-dashboard-empty",
-        text: "No metric data found. Fill these properties in daily notes: learningHours, exerciseDone, sleepHours, masturbation.",
+        text: "还没有配置任何指标，请到插件设置里配置 Daily metrics fields。",
       });
-    } else {
-      const formatMetricValue = (value) => {
-        if (!Number.isFinite(value)) {
-          return "-";
+    }
+    const formatMetricValue = (value) => {
+      if (!Number.isFinite(value)) {
+        return "-";
+      }
+      return Number.isInteger(value) ? String(value) : String(Number(value).toFixed(2));
+    };
+
+    if (metrics.length > 0) {
+      const todayValues = metricsSnapshot.todayValues && typeof metricsSnapshot.todayValues === "object"
+        ? metricsSnapshot.todayValues
+        : {};
+      const metricEditor = metricsCard.createDiv({ cls: "northstar-metric-editor" });
+      const metricEditorTop = metricEditor.createDiv({ cls: "northstar-metric-editor-top" });
+      metricEditorTop.createEl("strong", {
+        text: `Today ${metricsSnapshot.todayDateKey}`,
+      });
+      metricEditorTop.createSpan({
+        cls: "northstar-homepage-card-hint",
+        text: "Click or input to save instantly",
+      });
+
+      const metricEditorGrid = metricEditor.createDiv({ cls: "northstar-metric-editor-grid" });
+      metrics.forEach((metric) => {
+        const field = metricEditorGrid.createDiv({ cls: "northstar-metric-editor-field" });
+        field.createEl("span", {
+          cls: "northstar-metric-editor-label",
+          text: metric.label,
+        });
+
+        if (metric.kind === "binary") {
+          const toggle = field.createEl("button", {
+            cls: `northstar-metric-toggle${Number(todayValues[metric.id]) > 0 ? " is-active" : ""}`,
+            text: Number(todayValues[metric.id]) > 0 ? "已完成" : "未完成",
+          });
+          toggle.type = "button";
+          toggle.addEventListener("click", async () => {
+            const nextValue = Number(todayValues[metric.id]) > 0 ? 0 : 1;
+            await this.trySetTodayMetricValue(metric, nextValue);
+            this.queueRefresh();
+          });
+          return;
         }
-        return Number.isInteger(value) ? String(value) : String(Number(value).toFixed(2));
-      };
+
+        const inputRow = field.createDiv({ cls: "northstar-metric-input-row" });
+        const input = inputRow.createEl("input", {
+          cls: "goals-create-input northstar-metric-input",
+          type: "number",
+          step: "0.1",
+          placeholder: "0",
+        });
+
+        if (Number.isFinite(Number(todayValues[metric.id]))) {
+          input.value = String(Number(todayValues[metric.id]));
+        }
+
+        const saveButton = inputRow.createEl("button", {
+          cls: "northstar-daily-archive",
+          text: "保存",
+        });
+        saveButton.type = "button";
+
+        const applyNumberMetric = async () => {
+          await this.trySetTodayMetricValue(metric, input.value);
+          this.queueRefresh();
+        };
+
+        saveButton.addEventListener("click", applyNumberMetric);
+        input.addEventListener("keydown", async (event) => {
+          if (event.key !== "Enter") {
+            return;
+          }
+
+          event.preventDefault();
+          await applyNumberMetric();
+        });
+      });
+
+      const hasAnySamples = metrics.some((metric) => Array.isArray(metric.samples) && metric.samples.length > 0);
+      if (!hasAnySamples) {
+        metricsCard.createEl("p", {
+          cls: "goals-dashboard-empty",
+          text: "还没有历史数据，先在上方录入今天的数据。",
+        });
+      }
 
       const metricList = metricsCard.createDiv({ cls: "northstar-metric-list" });
       metrics.forEach((metric) => {
@@ -243,9 +326,15 @@ class HomeDashboardView extends ItemView {
           cls: "northstar-metric-name",
           text: metric.label,
         });
-        meta.createSpan({
-          cls: "northstar-metric-stats",
-          text: `latest ${formatMetricValue(metric.latest)} | avg ${formatMetricValue(metric.average)}`,
+
+        const stats = meta.createDiv({ cls: "northstar-metric-stats" });
+        stats.createSpan({
+          cls: "northstar-metric-chip",
+          text: `latest ${formatMetricValue(metric.latest)}`,
+        });
+        stats.createSpan({
+          cls: "northstar-metric-chip",
+          text: `avg ${formatMetricValue(metric.average)}`,
         });
 
         if (!Array.isArray(metric.samples) || metric.samples.length === 0) {
@@ -260,11 +349,19 @@ class HomeDashboardView extends ItemView {
         const values = metric.samples.map((sample) => sample.value);
         const maxValue = metric.kind === "binary" ? 1 : Math.max(...values, 1);
         metric.samples.forEach((sample) => {
-          const bar = sparkline.createSpan({ cls: "northstar-metric-bar" });
+          const point = sparkline.createDiv({ cls: "northstar-metric-point" });
           const ratio = maxValue <= 0 ? 0 : sample.value / maxValue;
-          const height = Math.max(0.08, Math.min(1, ratio));
-          bar.style.height = `${Math.round(height * 100)}%`;
-          bar.title = `${sample.date}: ${sample.value}`;
+          point.style.setProperty("--northstar-metric-ratio", String(Math.max(0, Math.min(1, ratio))));
+          point.title = `${sample.date}: ${sample.value}`;
+
+          point.createSpan({
+            cls: "northstar-metric-point-date",
+            text: String(sample.date).slice(5),
+          });
+          point.createSpan({
+            cls: "northstar-metric-point-value",
+            text: formatMetricValue(sample.value),
+          });
         });
       });
     }
@@ -273,6 +370,193 @@ class HomeDashboardView extends ItemView {
       cls: "northstar-homepage-card northstar-homepage-calendar-tasks-card",
     });
     await this.renderCalendarTasksCard(calendarTasksCard);
+
+    const linksRow = container.createDiv({ cls: "northstar-homepage-links-row" });
+    const bookmarkItems = this.getBookmarkedFiles();
+    const recentItems = this.getRecentFiles();
+
+    const bookmarkCard = linksRow.createDiv({ cls: "northstar-homepage-card" });
+    const recentCard = linksRow.createDiv({ cls: "northstar-homepage-card" });
+
+    this.renderBookmarkCard(bookmarkCard, bookmarkItems);
+    this.renderRecentFilesCard(recentCard, recentItems);
+    this.applyQuickListLayout(linksRow, bookmarkItems.length, recentItems.length);
+  }
+
+  renderBookmarkCard(card, bookmarkItems = this.getBookmarkedFiles()) {
+    card.addClass("northstar-homepage-list-bookmark");
+    const top = card.createDiv({ cls: "northstar-homepage-card-top" });
+    top.createEl("h3", { text: "书签" });
+    top.createEl("span", {
+      cls: "northstar-homepage-card-hint",
+      text: bookmarkItems.length > 0 ? `共 ${bookmarkItems.length} 条` : "暂无书签",
+    });
+
+    this.renderQuickFileList(card, bookmarkItems, {
+      emptyText: "还没有可打开的书签文件。",
+      titleFallback: "未命名文件",
+      variant: "bookmark",
+    });
+  }
+
+  renderRecentFilesCard(card, recentItems = this.getRecentFiles()) {
+    card.addClass("northstar-homepage-list-recent");
+    const top = card.createDiv({ cls: "northstar-homepage-card-top" });
+    top.createEl("h3", { text: "最近打开" });
+    top.createEl("span", {
+      cls: "northstar-homepage-card-hint",
+      text: recentItems.length > 0 ? `最近 ${recentItems.length} 条` : "暂无记录",
+    });
+
+    this.renderQuickFileList(card, recentItems, {
+      emptyText: "还没有最近打开的页面。",
+      titleFallback: "未命名文件",
+      variant: "recent",
+    });
+  }
+
+  applyQuickListLayout(container, bookmarkCount, recentCount) {
+    const bookmarkWeight = Math.max(0.84, Math.min(1.3, 0.84 + Math.min(bookmarkCount, 14) * 0.05));
+    const recentWeight = Math.max(0.92, Math.min(1.62, 0.92 + Math.min(recentCount, 14) * 0.05));
+    container.style.setProperty("--northstar-bookmark-col", `${bookmarkWeight.toFixed(2)}fr`);
+    container.style.setProperty("--northstar-recent-col", `${recentWeight.toFixed(2)}fr`);
+  }
+
+  renderQuickFileList(card, items, options = {}) {
+    if (!Array.isArray(items) || items.length === 0) {
+      card.createEl("p", {
+        cls: "goals-dashboard-empty",
+        text: options.emptyText || "暂无可显示内容。",
+      });
+      return;
+    }
+
+    const density = items.length >= 10 ? "dense" : items.length <= 3 ? "relaxed" : "balanced";
+    card.addClass(`northstar-homepage-list-${density}`);
+    if (options.variant) {
+      card.addClass(`northstar-homepage-list-${options.variant}`);
+    }
+
+    const list = card.createDiv({ cls: "northstar-homepage-link-list" });
+    items.forEach((item) => {
+      const button = list.createEl("button", {
+        cls: "northstar-homepage-link-item",
+      });
+      button.type = "button";
+
+      button.createSpan({
+        cls: "northstar-homepage-link-icon",
+        text: options.variant === "bookmark" ? "B" : "R",
+      });
+
+      const content = button.createDiv({ cls: "northstar-homepage-link-content" });
+      content.createSpan({
+        cls: "northstar-homepage-link-title",
+        text: String(item.title || options.titleFallback || "未命名文件"),
+      });
+      content.createSpan({
+        cls: "northstar-homepage-link-path",
+        text: item.path,
+      });
+
+      button.createSpan({
+        cls: "northstar-homepage-link-arrow",
+        text: ">",
+      });
+
+      button.addEventListener("click", async () => {
+        await this.openQuickFileByPath(item.path);
+      });
+    });
+  }
+
+  getBookmarkedFiles() {
+    const pluginEntry = this.app.internalPlugins?.plugins?.bookmarks;
+    const bookmarkPlugin = pluginEntry?.instance || this.app.internalPlugins?.getPluginById?.("bookmarks")?.instance;
+    const rootItems = Array.isArray(bookmarkPlugin?.items) ? bookmarkPlugin.items : [];
+    const files = [];
+    const seenPaths = new Set();
+
+    const visit = (items) => {
+      if (!Array.isArray(items)) {
+        return;
+      }
+
+      items.forEach((item) => {
+        if (!item || typeof item !== "object") {
+          return;
+        }
+
+        const nestedItems = Array.isArray(item.items) ? item.items : [];
+        if (nestedItems.length > 0) {
+          visit(nestedItems);
+        }
+
+        if (item.type !== "file") {
+          return;
+        }
+
+        const path = String(item.path ?? "").trim();
+        if (!path || seenPaths.has(path)) {
+          return;
+        }
+
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!file || Array.isArray(file.children) || file.extension !== "md") {
+          return;
+        }
+
+        seenPaths.add(path);
+        files.push({
+          path,
+          title: file.basename,
+        });
+      });
+    };
+
+    visit(rootItems);
+    return files.slice(0, 30);
+  }
+
+  getRecentFiles() {
+    const recentPaths =
+      typeof this.app.workspace.getLastOpenFiles === "function"
+        ? this.app.workspace.getLastOpenFiles()
+        : [];
+    const files = [];
+    const seenPaths = new Set();
+
+    recentPaths.forEach((entryPath) => {
+      const path = String(entryPath ?? "").trim();
+      if (!path || seenPaths.has(path)) {
+        return;
+      }
+
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (!file || Array.isArray(file.children) || file.extension !== "md") {
+        return;
+      }
+
+      seenPaths.add(path);
+      files.push({
+        path,
+        title: file.basename,
+      });
+    });
+
+    return files.slice(0, 30);
+  }
+
+  async openQuickFileByPath(path) {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!file || Array.isArray(file.children) || file.extension !== "md") {
+      new Notice("文件不存在或不是 Markdown 页面。");
+      return;
+    }
+
+    const leaf = this.app.workspace.getLeaf("split");
+    await leaf.openFile(file, { active: true });
+    this.app.workspace.revealLeaf(leaf);
   }
 
   initializeCalendarState() {
@@ -716,6 +1000,37 @@ class HomeDashboardView extends ItemView {
       console.error(error);
       new Notice("添加任务失败。");
       return 0;
+    }
+  }
+
+  async trySetTodayMetricValue(metric, rawValue) {
+    try {
+      await this.plugin.setTodayHomeMetricValue(metric.id, rawValue);
+      new Notice(`已更新 ${metric.label}`);
+    } catch (error) {
+      const code = String(error?.message ?? "");
+      if (code === "unknown-home-metric") {
+        new Notice("指标不存在，请检查设置。", 3200);
+        return;
+      }
+
+      if (code === "invalid-home-metric-value") {
+        new Notice(metric.kind === "binary" ? "请使用 0/1 记录该指标。" : "请输入有效数字。", 3200);
+        return;
+      }
+
+      if (code === "daily-template-not-found") {
+        new Notice("未找到 daily template，请先在设置中配置。", 3200);
+        return;
+      }
+
+      if (code === "daily-path-conflict") {
+        new Notice("今日日记路径已存在同名文件夹或非 Markdown 文件。", 3200);
+        return;
+      }
+
+      console.error(error);
+      new Notice("保存 daily metric 失败。", 3200);
     }
   }
 
