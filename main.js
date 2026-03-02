@@ -356,7 +356,16 @@ class GoalsDashboardPlugin extends Plugin {
       this.settings.boardOrder = [];
     }
 
-    this.settings.kanbanListOrder = normalizeKanbanListOrder(this.settings.kanbanListOrder, []);
+    const archivedLists = Array.isArray(this.settings.kanbanArchivedLists)
+      ? this.settings.kanbanArchivedLists
+          .map((name) => normalizeKanbanListName(name))
+          .filter((name, index, list) => name && list.indexOf(name) === index)
+      : [];
+
+    this.settings.kanbanListOrder = normalizeKanbanListOrder(this.settings.kanbanListOrder, archivedLists);
+    this.settings.kanbanArchivedLists = archivedLists.filter((name) =>
+      this.settings.kanbanListOrder.includes(name),
+    );
 
     this.settings.goalsFolder = normalizeFolderPath(this.settings.goalsFolder, DEFAULT_SETTINGS.goalsFolder);
     this.settings.kanbanFolder = normalizeFolderPath(this.settings.kanbanFolder, DEFAULT_SETTINGS.kanbanFolder);
@@ -374,7 +383,7 @@ class GoalsDashboardPlugin extends Plugin {
     if (state.resetKey !== nextResetKey) {
       this.settings.homeDailyListState = {
         resetKey: nextResetKey,
-        items: templateItems.map((text) => ({ text, done: false })),
+        items: templateItems.map((text) => ({ text, done: false, archived: false })),
       };
       await this.saveSettings();
       return { changed: true, state: this.settings.homeDailyListState };
@@ -408,6 +417,7 @@ class GoalsDashboardPlugin extends Plugin {
     items[index] = {
       text: items[index].text,
       done: Boolean(done),
+      archived: Boolean(items[index].archived),
     };
 
     this.settings.homeDailyListState = {
@@ -424,7 +434,27 @@ class GoalsDashboardPlugin extends Plugin {
     }
 
     const ensured = await this.ensureHomeDailyListState();
-    const items = [...ensured.state.items, { text: value, done: false }];
+    const items = [...ensured.state.items, { text: value, done: false, archived: false }];
+    this.settings.homeDailyListState = {
+      resetKey: ensured.state.resetKey,
+      items,
+    };
+    await this.saveSettings();
+  }
+
+  async archiveHomeDailyItem(index) {
+    const ensured = await this.ensureHomeDailyListState();
+    const items = [...ensured.state.items];
+    if (!items[index]) {
+      return;
+    }
+
+    items[index] = {
+      text: items[index].text,
+      done: Boolean(items[index].done),
+      archived: true,
+    };
+
     this.settings.homeDailyListState = {
       resetKey: ensured.state.resetKey,
       items,
@@ -941,15 +971,171 @@ class GoalsDashboardPlugin extends Plugin {
   async createKanbanList(name) {
     const listName = normalizeKanbanListName(name);
     const nextListOrder = normalizeKanbanListOrder(this.settings.kanbanListOrder, [listName]);
+    const nextArchivedLists = this.settings.kanbanArchivedLists.filter(
+      (list) => normalizeKanbanListName(list) !== listName,
+    );
     const changed = nextListOrder.join("\n") !== this.settings.kanbanListOrder.join("\n");
-    if (changed) {
+    const archiveChanged = nextArchivedLists.join("\n") !== this.settings.kanbanArchivedLists.join("\n");
+    if (changed || archiveChanged) {
       this.settings.kanbanListOrder = nextListOrder;
+      this.settings.kanbanArchivedLists = nextArchivedLists;
       await this.saveSettings();
     }
 
     return {
       name: listName,
       created: changed,
+      unarchived: archiveChanged,
+    };
+  }
+
+  async renameKanbanList(fromName, toName) {
+    const sourceList = normalizeKanbanListName(fromName);
+    const targetList = normalizeKanbanListName(toName);
+
+    if (sourceList === targetList) {
+      return {
+        from: sourceList,
+        to: targetList,
+        renamed: false,
+        movedCount: 0,
+      };
+    }
+
+    const todos = await this.getKanbanBoards();
+    const sourceTodos = todos.filter((todo) => todo.list === sourceList);
+    for (const todo of sourceTodos) {
+      await this.app.fileManager.processFrontMatter(todo.file, (fm) => {
+        fm.list = targetList;
+      });
+    }
+
+    const nextListOrder = normalizeKanbanListOrder(
+      this.settings.kanbanListOrder.map((list) =>
+        normalizeKanbanListName(list) === sourceList ? targetList : list,
+      ),
+      [targetList],
+    );
+    const nextArchivedLists = this.settings.kanbanArchivedLists
+      .map((list) =>
+        normalizeKanbanListName(list) === sourceList ? targetList : normalizeKanbanListName(list),
+      )
+      .filter((list, index, all) => all.indexOf(list) === index);
+
+    if (
+      nextListOrder.join("\n") !== this.settings.kanbanListOrder.join("\n") ||
+      nextArchivedLists.join("\n") !== this.settings.kanbanArchivedLists.join("\n")
+    ) {
+      this.settings.kanbanListOrder = nextListOrder;
+      this.settings.kanbanArchivedLists = nextArchivedLists;
+      await this.saveSettings();
+    }
+
+    return {
+      from: sourceList,
+      to: targetList,
+      renamed: true,
+      movedCount: sourceTodos.length,
+    };
+  }
+
+  async removeKanbanList(name, destinationName) {
+    const listName = normalizeKanbanListName(name);
+    const todos = await this.getKanbanBoards();
+    const sourceTodos = todos.filter((todo) => todo.list === listName);
+
+    const allLists = normalizeKanbanListOrder(
+      this.settings.kanbanListOrder,
+      todos.map((todo) => todo.list),
+    );
+    const remainingLists = allLists.filter((list) => list !== listName);
+
+    let destinationList = String(destinationName ?? "").trim()
+      ? normalizeKanbanListName(destinationName)
+      : "";
+
+    if (sourceTodos.length > 0) {
+      if (!destinationList) {
+        destinationList = remainingLists[0] || "Today";
+      }
+
+      if (destinationList === listName) {
+        throw new Error("remove-list-target-matches-source");
+      }
+
+      for (const todo of sourceTodos) {
+        await this.app.fileManager.processFrontMatter(todo.file, (fm) => {
+          fm.list = destinationList;
+        });
+      }
+    }
+
+    const nextListOrder = normalizeKanbanListOrder(
+      this.settings.kanbanListOrder.filter((list) => normalizeKanbanListName(list) !== listName),
+      sourceTodos.length > 0 ? [destinationList] : [],
+    );
+    const nextArchivedLists = this.settings.kanbanArchivedLists.filter(
+      (list) => normalizeKanbanListName(list) !== listName,
+    );
+
+    if (
+      nextListOrder.join("\n") !== this.settings.kanbanListOrder.join("\n") ||
+      nextArchivedLists.join("\n") !== this.settings.kanbanArchivedLists.join("\n")
+    ) {
+      this.settings.kanbanListOrder = nextListOrder;
+      this.settings.kanbanArchivedLists = nextArchivedLists;
+      await this.saveSettings();
+    }
+
+    return {
+      removed: listName,
+      target: destinationList,
+      movedCount: sourceTodos.length,
+    };
+  }
+
+  isKanbanListArchived(name) {
+    const listName = normalizeKanbanListName(name);
+    return this.settings.kanbanArchivedLists.includes(listName);
+  }
+
+  async archiveKanbanList(name) {
+    const listName = normalizeKanbanListName(name);
+    if (this.settings.kanbanArchivedLists.includes(listName)) {
+      return {
+        name: listName,
+        archived: false,
+      };
+    }
+
+    this.settings.kanbanListOrder = normalizeKanbanListOrder(this.settings.kanbanListOrder, [listName]);
+    this.settings.kanbanArchivedLists = [...this.settings.kanbanArchivedLists, listName].filter(
+      (list, index, all) => all.indexOf(list) === index,
+    );
+    await this.saveSettings();
+
+    return {
+      name: listName,
+      archived: true,
+    };
+  }
+
+  async unarchiveKanbanList(name) {
+    const listName = normalizeKanbanListName(name);
+    const nextArchivedLists = this.settings.kanbanArchivedLists.filter((list) => list !== listName);
+    if (nextArchivedLists.join("\n") === this.settings.kanbanArchivedLists.join("\n")) {
+      return {
+        name: listName,
+        unarchived: false,
+      };
+    }
+
+    this.settings.kanbanArchivedLists = nextArchivedLists;
+    await this.saveSettings();
+
+    return {
+      name: listName,
+      unarchived: true,
     };
   }
 

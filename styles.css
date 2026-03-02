@@ -639,6 +639,13 @@
   justify-content: space-between;
 }
 
+.kanban-todo-list-top-right {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .kanban-todo-list-title {
   align-items: center;
   display: flex;
@@ -651,6 +658,40 @@
   display: inline-flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+.kanban-todo-list-actions {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.kanban-todo-list-action {
+  align-items: center;
+  background: color-mix(in srgb, var(--background-primary) 90%, #232330 10%);
+  border: 1px solid var(--kanban-row-border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  width: 26px;
+}
+
+.kanban-todo-list-action:hover {
+  border-color: var(--text-accent);
+  color: var(--text-accent);
+}
+
+.kanban-todo-list-action[aria-label^="Archive list"]:hover {
+  border-color: #d0a34f;
+  color: #d0a34f;
+}
+
+.kanban-todo-list-action.is-danger:hover {
+  border-color: var(--text-error);
+  color: var(--text-error);
 }
 
 .kanban-todo-checklist {
@@ -752,6 +793,57 @@
   padding: 3px 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.kanban-archived-section {
+  border-top: 1px dashed var(--kanban-row-border);
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 10px;
+}
+
+.kanban-archived-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.kanban-archived-title {
+  color: var(--text-muted);
+  font-size: 14px;
+  margin: 0;
+}
+
+.kanban-archived-list {
+  display: grid;
+  gap: 8px;
+}
+
+.kanban-archived-row {
+  align-items: center;
+  background: color-mix(in srgb, var(--background-primary) 90%, #1f1f27 10%);
+  border: 1px solid var(--kanban-row-border);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  padding: 8px 10px;
+}
+
+.kanban-archived-row-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.kanban-archived-row-stats {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.kanban-archived-row-actions {
+  display: inline-flex;
+  gap: 6px;
 }
 
 .northstar-homepage-view {
@@ -952,7 +1044,7 @@
   border-radius: 8px;
   display: grid;
   gap: 8px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   padding: 8px 10px;
 }
 
@@ -965,6 +1057,7 @@
   font-size: 14px;
 }
 
+.northstar-daily-archive,
 .northstar-daily-remove {
   border-radius: 6px;
   font-size: 12px;
@@ -1062,6 +1155,23 @@
 
   .kanban-todo-row-link {
     font-size: 16px;
+  }
+
+  .kanban-todo-list-top {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .kanban-todo-list-top-right {
+    margin-left: 0;
+  }
+
+  .kanban-archived-row {
+    grid-template-columns: 1fr;
+  }
+
+  .kanban-archived-row-actions {
+    justify-content: flex-start;
   }
 
   .northstar-calendar-event {

@@ -127,14 +127,19 @@ class HomeDashboardView extends ItemView {
     });
 
     const state = await this.plugin.getHomeDailyListState();
-    if (!Array.isArray(state.items) || state.items.length === 0) {
+    const visibleItems = Array.isArray(state.items)
+      ? state.items
+        .map((item, index) => ({ ...item, index }))
+        .filter((item) => !item.archived)
+      : [];
+    if (visibleItems.length === 0) {
       listCard.createEl("p", {
         cls: "goals-dashboard-empty",
         text: "No items. Add one above or configure template in settings.",
       });
     } else {
       const list = listCard.createDiv({ cls: "northstar-daily-list" });
-      state.items.forEach((item, index) => {
+      visibleItems.forEach((item) => {
         const row = list.createDiv({ cls: `northstar-daily-item${item.done ? " is-done" : ""}` });
 
         const checkbox = row.createEl("input", {
@@ -142,7 +147,7 @@ class HomeDashboardView extends ItemView {
         });
         checkbox.checked = Boolean(item.done);
         checkbox.addEventListener("change", async () => {
-          await this.plugin.setHomeDailyItemDone(index, checkbox.checked);
+          await this.plugin.setHomeDailyItemDone(item.index, checkbox.checked);
           this.queueRefresh();
         });
 
@@ -151,12 +156,21 @@ class HomeDashboardView extends ItemView {
           text: item.text,
         });
 
+        const archiveButton = row.createEl("button", {
+          cls: "northstar-daily-archive",
+          text: "Archive",
+        });
+        archiveButton.addEventListener("click", async () => {
+          await this.plugin.archiveHomeDailyItem(item.index);
+          this.queueRefresh();
+        });
+
         const removeButton = row.createEl("button", {
           cls: "northstar-daily-remove",
           text: "Remove",
         });
         removeButton.addEventListener("click", async () => {
-          await this.plugin.removeHomeDailyItem(index);
+          await this.plugin.removeHomeDailyItem(item.index);
           this.queueRefresh();
         });
       });

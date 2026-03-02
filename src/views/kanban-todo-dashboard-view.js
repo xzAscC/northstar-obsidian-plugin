@@ -117,6 +117,13 @@ class KanbanTodoDashboardView extends ItemView {
     refreshButton.addEventListener("click", () => this.render());
 
     const todos = await this.plugin.getKanbanBoards();
+    const todosByList = groupBy(todos, (todo) => todo.list);
+    const listsInView = normalizeKanbanListOrder(
+      this.plugin.settings.kanbanListOrder,
+      Array.from(todosByList.keys()),
+    );
+    const archivedLists = listsInView.filter((listName) => this.plugin.isKanbanListArchived(listName));
+    const activeLists = listsInView.filter((listName) => !this.plugin.isKanbanListArchived(listName));
 
     const openCount = todos.filter((todo) => !todo.done).length;
     const doneCount = todos.length - openCount;
@@ -134,12 +141,12 @@ class KanbanTodoDashboardView extends ItemView {
       cls: "milestone-stat-chip",
       text: `Total ${todos.length}`,
     });
-
-    const todosByList = groupBy(todos, (todo) => todo.list);
-    const listsInView = normalizeKanbanListOrder(
-      this.plugin.settings.kanbanListOrder,
-      Array.from(todosByList.keys()),
-    );
+    if (archivedLists.length > 0) {
+      statRow.createEl("span", {
+        cls: "milestone-stat-chip",
+        text: `Archived Lists ${archivedLists.length}`,
+      });
+    }
 
     if (todos.length === 0) {
       container.createEl("p", {
@@ -149,7 +156,7 @@ class KanbanTodoDashboardView extends ItemView {
     }
 
     const lanes = container.createDiv({ cls: "kanban-todo-lanes" });
-    for (const listName of listsInView) {
+    for (const listName of activeLists) {
       const listTodos = [...(todosByList.get(listName) || [])];
       const visibleTodos = listTodos.filter((todo) => !todo.done);
       const openInList = visibleTodos.length;
@@ -162,7 +169,8 @@ class KanbanTodoDashboardView extends ItemView {
         text: listName,
       });
 
-      const listStats = listTop.createDiv({ cls: "kanban-todo-list-stats" });
+      const listTopRight = listTop.createDiv({ cls: "kanban-todo-list-top-right" });
+      const listStats = listTopRight.createDiv({ cls: "kanban-todo-list-stats" });
       listStats.createEl("span", {
         cls: "milestone-stat-chip",
         text: `Open ${openInList}`,
@@ -170,6 +178,34 @@ class KanbanTodoDashboardView extends ItemView {
       listStats.createEl("span", {
         cls: "milestone-stat-chip",
         text: `Done ${doneInList}`,
+      });
+
+      const listActions = listTopRight.createDiv({ cls: "kanban-todo-list-actions" });
+      const renameButton = listActions.createEl("button", {
+        cls: "kanban-todo-list-action",
+      });
+      renameButton.ariaLabel = `Rename list ${listName}`;
+      setIcon(renameButton, "pencil");
+      renameButton.addEventListener("click", async () => {
+        await this.renameListFromDashboard(listName, listsInView);
+      });
+
+      const archiveButton = listActions.createEl("button", {
+        cls: "kanban-todo-list-action",
+      });
+      archiveButton.ariaLabel = `Archive list ${listName}`;
+      setIcon(archiveButton, "archive");
+      archiveButton.addEventListener("click", async () => {
+        await this.archiveListFromDashboard(listName, listTodos);
+      });
+
+      const removeButton = listActions.createEl("button", {
+        cls: "kanban-todo-list-action is-danger",
+      });
+      removeButton.ariaLabel = `Remove list ${listName}`;
+      setIcon(removeButton, "trash-2");
+      removeButton.addEventListener("click", async () => {
+        await this.removeListFromDashboard(listName, listTodos, listsInView);
       });
 
       const list = listWrap.createDiv({ cls: "kanban-todo-checklist" });
@@ -217,6 +253,54 @@ class KanbanTodoDashboardView extends ItemView {
         }
       }
     }
+
+    if (activeLists.length === 0) {
+      const empty = container.createDiv({ cls: "kanban-todo-empty" });
+      empty.createSpan({ text: "No active lists. Unarchive a list or add a new one." });
+    }
+
+    if (archivedLists.length > 0) {
+      const archivedSection = container.createDiv({ cls: "kanban-archived-section" });
+      const archivedHeader = archivedSection.createDiv({ cls: "kanban-archived-header" });
+      archivedHeader.createEl("h3", {
+        cls: "kanban-archived-title",
+        text: "Archived Lists",
+      });
+
+      const archivedList = archivedSection.createDiv({ cls: "kanban-archived-list" });
+      for (const listName of archivedLists) {
+        const listTodos = [...(todosByList.get(listName) || [])];
+        const openInList = listTodos.filter((todo) => !todo.done).length;
+        const doneInList = listTodos.length - openInList;
+
+        const row = archivedList.createDiv({ cls: "kanban-archived-row" });
+        row.createEl("div", {
+          cls: "kanban-archived-row-name",
+          text: listName,
+        });
+        row.createEl("div", {
+          cls: "kanban-archived-row-stats",
+          text: `Open ${openInList} / Done ${doneInList}`,
+        });
+
+        const actions = row.createDiv({ cls: "kanban-archived-row-actions" });
+        const unarchiveButton = actions.createEl("button", {
+          cls: "goals-dashboard-refresh",
+          text: "Unarchive",
+        });
+        unarchiveButton.addEventListener("click", async () => {
+          await this.unarchiveListFromDashboard(listName);
+        });
+
+        const removeButton = actions.createEl("button", {
+          cls: "goals-dashboard-refresh",
+          text: "Remove",
+        });
+        removeButton.addEventListener("click", async () => {
+          await this.removeListFromDashboard(listName, listTodos, listsInView);
+        });
+      }
+    }
   }
 
   async toggleTodoState(file, currentDone) {
@@ -234,10 +318,11 @@ class KanbanTodoDashboardView extends ItemView {
   }
 
   async createTodoFromDashboard() {
-    const todoLists = normalizeKanbanListOrder(
+    const allTodoLists = normalizeKanbanListOrder(
       this.plugin.settings.kanbanListOrder,
       (await this.plugin.getKanbanBoards()).map((todo) => todo.list),
     );
+    const todoLists = allTodoLists.filter((listName) => !this.plugin.isKanbanListArchived(listName));
 
     const payload = await this.promptCreateTodo({
       name: "",
@@ -284,7 +369,9 @@ class KanbanTodoDashboardView extends ItemView {
 
     try {
       const result = await this.plugin.createKanbanList(listName);
-      if (result.created) {
+      if (result.unarchived) {
+        new Notice(`List restored: ${result.name}`);
+      } else if (result.created) {
         new Notice(`List created: ${result.name}`);
       } else {
         new Notice(`List already exists: ${result.name}`);
@@ -296,6 +383,134 @@ class KanbanTodoDashboardView extends ItemView {
     }
   }
 
+  async renameListFromDashboard(currentName, listsInView) {
+    const nextName = await this.promptKanbanListName({
+      title: "Rename Kanban List",
+      label: "New List Name",
+      submitText: "Rename",
+      value: currentName,
+      placeholder: "Next",
+      suggestions: listsInView.filter((name) => name !== currentName),
+    });
+
+    if (!nextName) {
+      return;
+    }
+
+    try {
+      const result = await this.plugin.renameKanbanList(currentName, nextName);
+      if (result.renamed) {
+        const movedText = result.movedCount > 0 ? ` (${result.movedCount} todo moved)` : "";
+        new Notice(`List renamed: ${result.from} -> ${result.to}${movedText}`);
+      } else {
+        new Notice(`List already named: ${result.to}`);
+      }
+      await this.render();
+    } catch (error) {
+      console.error(error);
+      new Notice("Failed to rename list.");
+    }
+  }
+
+  async archiveListFromDashboard(listName, listTodos) {
+    const todoCount = listTodos.length;
+    const message =
+      todoCount > 0
+        ? `Archive list "${listName}" with ${todoCount} ${todoCount === 1 ? "todo" : "todos"}?`
+        : `Archive empty list "${listName}"?`;
+
+    if (!window.confirm(message)) {
+      return;
+    }
+
+    try {
+      const result = await this.plugin.archiveKanbanList(listName);
+      if (result.archived) {
+        new Notice(`List archived: ${result.name}`);
+      } else {
+        new Notice(`List already archived: ${result.name}`);
+      }
+      await this.render();
+    } catch (error) {
+      console.error(error);
+      new Notice("Failed to archive list.");
+    }
+  }
+
+  async unarchiveListFromDashboard(listName) {
+    try {
+      const result = await this.plugin.unarchiveKanbanList(listName);
+      if (result.unarchived) {
+        new Notice(`List restored: ${result.name}`);
+      } else {
+        new Notice(`List is already active: ${result.name}`);
+      }
+      await this.render();
+    } catch (error) {
+      console.error(error);
+      new Notice("Failed to restore list.");
+    }
+  }
+
+  async removeListFromDashboard(listName, listTodos, listsInView) {
+    const todoCount = listTodos.length;
+    const destinationOptions = listsInView.filter((name) => name !== listName);
+    let targetList = "";
+
+    if (todoCount > 0) {
+      if (destinationOptions.length === 0) {
+        new Notice("Cannot remove the only list while it still has todos.");
+        return;
+      }
+
+      const todoLabel = todoCount === 1 ? "todo" : "todos";
+
+      targetList = await this.promptKanbanListName({
+        title: "Remove Kanban List",
+        label: "Move todos to",
+        submitText: "Remove list",
+        value: destinationOptions[0],
+        placeholder: "Today",
+        suggestions: destinationOptions,
+        description: `${todoCount} ${todoLabel} will be moved before removing "${listName}".`,
+      });
+
+      if (!targetList) {
+        return;
+      }
+    }
+
+    const message =
+      todoCount > 0
+        ? `Remove list "${listName}" and move ${todoCount} ${todoCount === 1 ? "todo" : "todos"} to "${targetList}"?`
+        : `Remove empty list "${listName}"?`;
+
+    if (!window.confirm(message)) {
+      return;
+    }
+
+    try {
+      const result = await this.plugin.removeKanbanList(listName, targetList);
+      if (result.movedCount > 0) {
+        new Notice(
+          `List removed: ${result.removed}. Moved ${result.movedCount} ${
+            result.movedCount === 1 ? "todo" : "todos"
+          } to ${result.target}.`,
+        );
+      } else {
+        new Notice(`List removed: ${result.removed}`);
+      }
+      await this.render();
+    } catch (error) {
+      if (error && error.message === "remove-list-target-matches-source") {
+        new Notice("Please choose another destination list.");
+      } else {
+        console.error(error);
+        new Notice("Failed to remove list.");
+      }
+    }
+  }
+
   async promptCreateTodo(defaults) {
     return new Promise((resolve) => {
       const modal = new CreateKanbanTodoModal(this.app, defaults, resolve);
@@ -304,8 +519,17 @@ class KanbanTodoDashboardView extends ItemView {
   }
 
   async promptCreateList() {
+    return this.promptKanbanListName({
+      title: "Add Kanban List",
+      label: "List Name",
+      submitText: "Add list",
+      placeholder: "Next",
+    });
+  }
+
+  async promptKanbanListName(options) {
     return new Promise((resolve) => {
-      const modal = new CreateKanbanListModal(this.app, resolve);
+      const modal = new CreateKanbanListModal(this.app, resolve, options);
       modal.open();
     });
   }

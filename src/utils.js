@@ -636,6 +636,7 @@ function normalizeHomeDailyListState(value) {
       .map((item) => ({
         text: String(item?.text ?? "").trim(),
         done: Boolean(item?.done),
+        archived: Boolean(item?.archived),
       }))
       .filter((item) => item.text)
     : [];
@@ -660,15 +661,23 @@ function mergeHomeDailyItems(currentItems, templateItems) {
   for (const templateText of template) {
     const existing = items.find((item) => item.text === templateText);
     if (existing) {
-      result.push({ text: existing.text, done: Boolean(existing.done) });
+      result.push({
+        text: existing.text,
+        done: Boolean(existing.done),
+        archived: Boolean(existing.archived),
+      });
     } else {
-      result.push({ text: templateText, done: false });
+      result.push({ text: templateText, done: false, archived: false });
     }
   }
 
   for (const item of items) {
     if (!template.includes(item.text)) {
-      result.push({ text: item.text, done: Boolean(item.done) });
+      result.push({
+        text: item.text,
+        done: Boolean(item.done),
+        archived: Boolean(item.archived),
+      });
     }
   }
 
@@ -689,7 +698,11 @@ function isSameHomeDailyItems(leftItems, rightItems) {
       return false;
     }
 
-    if (leftItem.text !== rightItem.text || Boolean(leftItem.done) !== Boolean(rightItem.done)) {
+    if (
+      leftItem.text !== rightItem.text ||
+      Boolean(leftItem.done) !== Boolean(rightItem.done) ||
+      Boolean(leftItem.archived) !== Boolean(rightItem.archived)
+    ) {
       return false;
     }
   }
