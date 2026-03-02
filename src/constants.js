@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS = {
     resetKey: "",
     items: [],
   },
+  homeCalendarTasksByDate: {},
   goalsFolder: "Goals",
   kanbanFolder: "Kanban",
   boardOrder: [],

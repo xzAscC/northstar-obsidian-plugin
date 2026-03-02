@@ -88,6 +88,7 @@ class HomeDashboardView extends ItemView {
     });
 
     const grid = container.createDiv({ cls: "northstar-homepage-grid" });
+    this.calendarTaskSummary = this.plugin.getHomeCalendarTaskSummaryByDate();
 
     const calendarCard = grid.createDiv({ cls: "northstar-homepage-card" });
     this.initializeCalendarState();
@@ -193,49 +194,53 @@ class HomeDashboardView extends ItemView {
         cls: "goals-dashboard-empty",
         text: "No metric data found. Fill these properties in daily notes: learningHours, exerciseDone, sleepHours, masturbation.",
       });
-      return;
+    } else {
+      const formatMetricValue = (value) => {
+        if (!Number.isFinite(value)) {
+          return "-";
+        }
+        return Number.isInteger(value) ? String(value) : String(Number(value).toFixed(2));
+      };
+
+      const metricList = metricsCard.createDiv({ cls: "northstar-metric-list" });
+      metrics.forEach((metric) => {
+        const item = metricList.createDiv({ cls: "northstar-metric-item" });
+        const meta = item.createDiv({ cls: "northstar-metric-meta" });
+
+        meta.createEl("strong", {
+          cls: "northstar-metric-name",
+          text: metric.label,
+        });
+        meta.createSpan({
+          cls: "northstar-metric-stats",
+          text: `latest ${formatMetricValue(metric.latest)} | avg ${formatMetricValue(metric.average)}`,
+        });
+
+        if (!Array.isArray(metric.samples) || metric.samples.length === 0) {
+          item.createEl("p", {
+            cls: "goals-dashboard-empty",
+            text: "No entries yet.",
+          });
+          return;
+        }
+
+        const sparkline = item.createDiv({ cls: "northstar-metric-sparkline" });
+        const values = metric.samples.map((sample) => sample.value);
+        const maxValue = metric.kind === "binary" ? 1 : Math.max(...values, 1);
+        metric.samples.forEach((sample) => {
+          const bar = sparkline.createSpan({ cls: "northstar-metric-bar" });
+          const ratio = maxValue <= 0 ? 0 : sample.value / maxValue;
+          const height = Math.max(0.08, Math.min(1, ratio));
+          bar.style.height = `${Math.round(height * 100)}%`;
+          bar.title = `${sample.date}: ${sample.value}`;
+        });
+      });
     }
 
-    const formatMetricValue = (value) => {
-      if (!Number.isFinite(value)) {
-        return "-";
-      }
-      return Number.isInteger(value) ? String(value) : String(Number(value).toFixed(2));
-    };
-
-    const metricList = metricsCard.createDiv({ cls: "northstar-metric-list" });
-    metrics.forEach((metric) => {
-      const item = metricList.createDiv({ cls: "northstar-metric-item" });
-      const meta = item.createDiv({ cls: "northstar-metric-meta" });
-
-      meta.createEl("strong", {
-        cls: "northstar-metric-name",
-        text: metric.label,
-      });
-      meta.createSpan({
-        cls: "northstar-metric-stats",
-        text: `latest ${formatMetricValue(metric.latest)} | avg ${formatMetricValue(metric.average)}`,
-      });
-
-      if (!Array.isArray(metric.samples) || metric.samples.length === 0) {
-        item.createEl("p", {
-          cls: "goals-dashboard-empty",
-          text: "No entries yet.",
-        });
-        return;
-      }
-
-      const sparkline = item.createDiv({ cls: "northstar-metric-sparkline" });
-      const values = metric.samples.map((sample) => sample.value);
-      const maxValue = metric.kind === "binary" ? 1 : Math.max(...values, 1);
-      metric.samples.forEach((sample) => {
-        const bar = sparkline.createSpan({ cls: "northstar-metric-bar" });
-        const ratio = maxValue <= 0 ? 0 : sample.value / maxValue;
-        const height = Math.max(0.08, Math.min(1, ratio));
-        bar.style.height = `${Math.round(height * 100)}%`;
-        bar.title = `${sample.date}: ${sample.value}`;
-      });
+    const calendarTasksCard = container.createDiv({
+      cls: "northstar-homepage-card northstar-homepage-calendar-tasks-card",
     });
+    await this.renderCalendarTasksCard(calendarTasksCard);
   }
 
   initializeCalendarState() {
@@ -344,6 +349,14 @@ class HomeDashboardView extends ItemView {
         text: day.exists ? "Open" : "Create",
       });
 
+      const taskSummary = this.calendarTaskSummary?.[day.dateKey];
+      if (taskSummary && taskSummary.total > 0) {
+        dayButton.createSpan({
+          cls: "northstar-calendar-day-task-count",
+          text: `${taskSummary.done}/${taskSummary.total}`,
+        });
+      }
+
       dayButton.addEventListener("click", async () => {
         this.calendarState.selected = day.date;
         this.calendarState.cursor = day.date;
@@ -357,6 +370,115 @@ class HomeDashboardView extends ItemView {
       text: "Click a date to open or create the daily note from template.",
     });
     hint.title = "Missing notes are auto-created from the configured template.";
+  }
+
+  async renderCalendarTasksCard(card) {
+    const date = this.calendarState?.selected ? this.toStartOfDay(this.calendarState.selected) : this.toStartOfDay(new Date());
+    const dateKey = this.toDateKey(date);
+    const isToday = this.isSameDate(date, new Date());
+    const tasks = await this.plugin.getHomeCalendarTasksByDate(dateKey);
+    const doneCount = tasks.filter((task) => task.done).length;
+
+    const top = card.createDiv({ cls: "northstar-homepage-card-top" });
+    top.createEl("h3", {
+      text: isToday ? "今日任务" : `${dateKey} 任务`,
+    });
+    top.createEl("span", {
+      cls: "northstar-homepage-card-hint",
+      text: tasks.length > 0 ? `完成 ${doneCount}/${tasks.length}` : "还没有任务",
+    });
+
+    const addRow = card.createDiv({ cls: "northstar-daily-list-add" });
+    const addInput = addRow.createEl("input", {
+      cls: "goals-create-input",
+      type: "text",
+      placeholder: isToday ? "添加今天要做的事" : `给 ${dateKey} 添加任务`,
+    });
+    const addButton = addRow.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "添加任务",
+    });
+
+    const rangeRow = card.createDiv({ cls: "northstar-calendar-task-range" });
+    const startInput = rangeRow.createEl("input", {
+      cls: "goals-create-input",
+      type: "date",
+      value: dateKey,
+    });
+    const endInput = rangeRow.createEl("input", {
+      cls: "goals-create-input",
+      type: "date",
+      value: dateKey,
+    });
+    const rangeButton = rangeRow.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "添加到区间",
+    });
+
+    card.createEl("span", {
+      cls: "northstar-homepage-card-hint",
+      text: "将同一任务批量添加到多个日期（含起止日）。",
+    });
+
+    const handleCreate = async () => {
+      await this.tryAddCalendarTask(dateKey, addInput.value);
+      addInput.value = "";
+      addInput.focus();
+    };
+
+    addButton.addEventListener("click", handleCreate);
+    addInput.addEventListener("keydown", async (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+
+      event.preventDefault();
+      await handleCreate();
+    });
+
+    rangeButton.addEventListener("click", async () => {
+      const addedDays = await this.tryAddCalendarTaskRange(startInput.value, endInput.value, addInput.value);
+      if (addedDays > 0) {
+        addInput.value = "";
+        addInput.focus();
+      }
+    });
+
+    if (tasks.length === 0) {
+      card.createEl("p", {
+        cls: "goals-dashboard-empty",
+        text: "这一天还没有任务，先添加一个吧。",
+      });
+      return;
+    }
+
+    const list = card.createDiv({ cls: "northstar-calendar-task-list" });
+    tasks.forEach((task, index) => {
+      const row = list.createDiv({ cls: `northstar-calendar-task-row${task.done ? " is-done" : ""}` });
+
+      const checkbox = row.createEl("input", {
+        type: "checkbox",
+      });
+      checkbox.checked = Boolean(task.done);
+      checkbox.addEventListener("change", async () => {
+        await this.plugin.setHomeCalendarTaskDone(dateKey, index, checkbox.checked);
+        this.queueRefresh();
+      });
+
+      row.createSpan({
+        cls: "northstar-calendar-task-text",
+        text: task.text,
+      });
+
+      const removeButton = row.createEl("button", {
+        cls: "northstar-daily-remove",
+        text: "移除",
+      });
+      removeButton.addEventListener("click", async () => {
+        await this.plugin.removeHomeCalendarTask(dateKey, index);
+        this.queueRefresh();
+      });
+    });
   }
 
   getCalendarTitle() {
@@ -506,6 +628,60 @@ class HomeDashboardView extends ItemView {
         console.error(error);
         new Notice("Failed to add daily item.");
       }
+    }
+  }
+
+  async tryAddCalendarTask(dateKey, value) {
+    try {
+      await this.plugin.addHomeCalendarTask(dateKey, value);
+      this.queueRefresh();
+    } catch (error) {
+      const code = String(error?.message ?? "");
+      if (code === "empty-calendar-task") {
+        new Notice("请输入任务内容。");
+        return;
+      }
+
+      if (code === "invalid-calendar-date") {
+        new Notice("日期无效，无法保存任务。");
+        return;
+      }
+
+      console.error(error);
+      new Notice("添加任务失败。");
+    }
+  }
+
+  async tryAddCalendarTaskRange(startDateKey, endDateKey, value) {
+    try {
+      const addedDays = await this.plugin.addHomeCalendarTaskRange(startDateKey, endDateKey, value);
+      this.queueRefresh();
+
+      if (addedDays > 1) {
+        new Notice(`已添加到 ${addedDays} 天。`);
+      }
+
+      return addedDays;
+    } catch (error) {
+      const code = String(error?.message ?? "");
+      if (code === "empty-calendar-task") {
+        new Notice("请输入任务内容。");
+        return 0;
+      }
+
+      if (code === "invalid-calendar-date") {
+        new Notice("日期无效，无法保存任务。");
+        return 0;
+      }
+
+      if (code === "invalid-calendar-range") {
+        new Notice("起始日期不能晚于结束日期。");
+        return 0;
+      }
+
+      console.error(error);
+      new Notice("添加任务失败。");
+      return 0;
     }
   }
 }

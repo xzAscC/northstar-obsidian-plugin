@@ -181,6 +181,63 @@ function parseDateKey(dateKey) {
   return parsed;
 }
 
+function listDateKeysInRange(startDateKey, endDateKey) {
+  const startDate = parseDateKey(startDateKey);
+  const endDate = parseDateKey(endDateKey);
+  if (!startDate || !endDate) {
+    throw new Error("invalid-calendar-date");
+  }
+
+  if (startDate.getTime() > endDate.getTime()) {
+    throw new Error("invalid-calendar-range");
+  }
+
+  const dateKeys = [];
+  const cursor = new Date(startDate.getTime());
+  while (cursor.getTime() <= endDate.getTime()) {
+    dateKeys.push(formatDateKey(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+    cursor.setHours(0, 0, 0, 0);
+  }
+
+  return dateKeys;
+}
+
+function normalizeHomeCalendarTaskItem(rawItem) {
+  const text = String(rawItem?.text ?? "").replace(/\s+/g, " ").trim();
+  if (!text) {
+    return null;
+  }
+
+  return {
+    text,
+    done: Boolean(rawItem?.done),
+  };
+}
+
+function normalizeHomeCalendarTasksByDate(rawState) {
+  if (!rawState || typeof rawState !== "object" || Array.isArray(rawState)) {
+    return {};
+  }
+
+  const normalized = {};
+  for (const [dateKey, taskList] of Object.entries(rawState)) {
+    if (!parseDateKey(dateKey)) {
+      continue;
+    }
+
+    const items = Array.isArray(taskList)
+      ? taskList.map((item) => normalizeHomeCalendarTaskItem(item)).filter(Boolean)
+      : [];
+
+    if (items.length > 0) {
+      normalized[dateKey] = items;
+    }
+  }
+
+  return normalized;
+}
+
 class GoalsDashboardPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
@@ -351,6 +408,9 @@ class GoalsDashboardPlugin extends Plugin {
       DEFAULT_SETTINGS.homeListTemplate,
     );
     this.settings.homeDailyListState = normalizeHomeDailyListState(this.settings.homeDailyListState);
+    this.settings.homeCalendarTasksByDate = normalizeHomeCalendarTasksByDate(
+      this.settings.homeCalendarTasksByDate,
+    );
 
     if (!Array.isArray(this.settings.boardOrder)) {
       this.settings.boardOrder = [];
@@ -625,6 +685,102 @@ class GoalsDashboardPlugin extends Plugin {
     }
 
     return items;
+  }
+
+  async getHomeCalendarTasksByDate(dateKey) {
+    if (!parseDateKey(dateKey)) {
+      throw new Error("invalid-calendar-date");
+    }
+
+    const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
+    return Array.isArray(source[dateKey]) ? [...source[dateKey]] : [];
+  }
+
+  getHomeCalendarTaskSummaryByDate() {
+    const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
+    const summary = {};
+
+    for (const [dateKey, tasks] of Object.entries(source)) {
+      const total = tasks.length;
+      const done = tasks.filter((task) => task.done).length;
+      summary[dateKey] = {
+        total,
+        done,
+      };
+    }
+
+    return summary;
+  }
+
+  async addHomeCalendarTask(dateKey, text) {
+    return this.addHomeCalendarTaskRange(dateKey, dateKey, text);
+  }
+
+  async addHomeCalendarTaskRange(startDateKey, endDateKey, text) {
+    const dateKeys = listDateKeysInRange(startDateKey, endDateKey);
+    const normalizedTask = normalizeHomeCalendarTaskItem({ text, done: false });
+    if (!normalizedTask) {
+      throw new Error("empty-calendar-task");
+    }
+
+    const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
+    const nextState = { ...source };
+    dateKeys.forEach((dateKey) => {
+      const tasks = Array.isArray(nextState[dateKey]) ? [...nextState[dateKey]] : [];
+      tasks.push({ ...normalizedTask });
+      nextState[dateKey] = tasks;
+    });
+
+    this.settings.homeCalendarTasksByDate = nextState;
+    await this.saveSettings();
+    return dateKeys.length;
+  }
+
+  async setHomeCalendarTaskDone(dateKey, index, done) {
+    if (!parseDateKey(dateKey)) {
+      throw new Error("invalid-calendar-date");
+    }
+
+    const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
+    const tasks = Array.isArray(source[dateKey]) ? [...source[dateKey]] : [];
+    if (!tasks[index]) {
+      return;
+    }
+
+    tasks[index] = {
+      text: tasks[index].text,
+      done: Boolean(done),
+    };
+
+    this.settings.homeCalendarTasksByDate = {
+      ...source,
+      [dateKey]: tasks,
+    };
+    await this.saveSettings();
+  }
+
+  async removeHomeCalendarTask(dateKey, index) {
+    if (!parseDateKey(dateKey)) {
+      throw new Error("invalid-calendar-date");
+    }
+
+    const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
+    const tasks = Array.isArray(source[dateKey])
+      ? source[dateKey].filter((_, taskIndex) => taskIndex !== index)
+      : [];
+
+    if (tasks.length > 0) {
+      this.settings.homeCalendarTasksByDate = {
+        ...source,
+        [dateKey]: tasks,
+      };
+    } else {
+      const nextState = { ...source };
+      delete nextState[dateKey];
+      this.settings.homeCalendarTasksByDate = nextState;
+    }
+
+    await this.saveSettings();
   }
 
   async readDailyTemplate() {

@@ -1038,6 +1038,17 @@
   text-transform: uppercase;
 }
 
+.northstar-calendar-day-task-count {
+  background: color-mix(in srgb, var(--text-accent) 18%, transparent);
+  border-radius: 999px;
+  color: var(--text-accent);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  margin-top: 2px;
+  padding: 2px 6px;
+}
+
 .northstar-calendar-cell.is-existing .northstar-calendar-day-state {
   color: color-mix(in srgb, var(--text-accent) 64%, #3b8f78 36%);
 }
@@ -1104,6 +1115,52 @@
 
 .northstar-homepage-metrics-card {
   min-height: 280px;
+}
+
+.northstar-homepage-calendar-tasks-card {
+  margin-top: 12px;
+  min-height: 180px;
+}
+
+.northstar-calendar-task-list {
+  display: grid;
+  gap: 8px;
+}
+
+.northstar-calendar-task-range {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  margin-top: 8px;
+}
+
+.northstar-calendar-task-range .goals-create-input {
+  min-width: 0;
+}
+
+.northstar-calendar-task-row {
+  align-items: center;
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--background-primary) 90%, #f7f3ec 10%),
+    color-mix(in srgb, var(--background-primary) 96%, #e6f0eb 4%)
+  );
+  border: 1px solid color-mix(in srgb, var(--home-card-border) 72%, transparent);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  padding: 8px 10px;
+}
+
+.northstar-calendar-task-row.is-done .northstar-calendar-task-text {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.northstar-calendar-task-text {
+  font-size: 14px;
+  line-height: 1.35;
 }
 
 .northstar-metric-list {
@@ -1231,5 +1288,9 @@
 
   .northstar-calendar-day-number {
     font-size: 13px;
+  }
+
+  .northstar-calendar-task-range {
+    grid-template-columns: 1fr;
   }
 }
