@@ -1122,6 +1122,101 @@
   min-height: 180px;
 }
 
+.northstar-homepage-clock-card {
+  gap: 12px;
+}
+
+.northstar-clock-local {
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--background-primary) 84%, #e7f4ee 16%),
+    color-mix(in srgb, var(--background-primary) 90%, #d5ebe2 10%)
+  );
+  border: 1px solid color-mix(in srgb, var(--home-card-border) 75%, transparent);
+  border-radius: 12px;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+}
+
+.northstar-clock-local-time {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.northstar-clock-local-date {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.northstar-clock-block {
+  background: color-mix(in srgb, var(--background-primary) 89%, #f6f2ea 11%);
+  border: 1px solid color-mix(in srgb, var(--home-card-border) 76%, transparent);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.northstar-clock-block-top {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.northstar-clock-mode {
+  background: color-mix(in srgb, var(--text-accent) 20%, transparent);
+  border-radius: 999px;
+  color: var(--text-accent);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 4px 8px;
+  text-transform: uppercase;
+}
+
+.northstar-clock-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.northstar-clock-timer {
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.northstar-clock-progress {
+  background: color-mix(in srgb, var(--background-modifier-border) 84%, transparent);
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.northstar-clock-progress-bar {
+  background: linear-gradient(90deg, #2d8b72, #22759a);
+  height: 100%;
+  transition: width 260ms ease;
+  width: 0;
+}
+
+.northstar-clock-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.northstar-clock-countdown-config {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.northstar-clock-countdown-config .goals-create-input {
+  min-width: 0;
+}
+
 .northstar-calendar-task-list {
   display: grid;
   gap: 8px;
@@ -1292,5 +1387,13 @@
 
   .northstar-calendar-task-range {
     grid-template-columns: 1fr;
+  }
+
+  .northstar-clock-local-time {
+    font-size: 22px;
+  }
+
+  .northstar-clock-timer {
+    font-size: 21px;
   }
 }

@@ -238,6 +238,93 @@ function normalizeHomeCalendarTasksByDate(rawState) {
   return normalized;
 }
 
+const DAILY_TASK_SECTION_HEADING = "## 今日任务";
+
+function isSameHomeCalendarTasks(leftTasks, rightTasks) {
+  const left = Array.isArray(leftTasks) ? leftTasks : [];
+  const right = Array.isArray(rightTasks) ? rightTasks : [];
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    const leftTask = left[index];
+    const rightTask = right[index];
+    if (!rightTask) {
+      return false;
+    }
+
+    if (leftTask.text !== rightTask.text || Boolean(leftTask.done) !== Boolean(rightTask.done)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function parseDailyTaskSection(markdown) {
+  const lines = String(markdown ?? "").replace(/\r\n/g, "\n").split("\n");
+  const sectionStart = lines.findIndex((line) => /^##\s*今日任务\s*$/.test(line.trim()));
+  if (sectionStart < 0) {
+    return { hasSection: false, tasks: [] };
+  }
+
+  let sectionEnd = lines.length;
+  for (let index = sectionStart + 1; index < lines.length; index += 1) {
+    if (/^##\s+/.test(lines[index].trim())) {
+      sectionEnd = index;
+      break;
+    }
+  }
+
+  const tasks = [];
+  for (let index = sectionStart + 1; index < sectionEnd; index += 1) {
+    const match = lines[index].match(/^\s*[-*]\s+\[([ xX])\]\s+(.+)$/);
+    if (!match) {
+      continue;
+    }
+
+    const normalized = normalizeHomeCalendarTaskItem({
+      text: match[2],
+      done: String(match[1]).toLowerCase() === "x",
+    });
+    if (normalized) {
+      tasks.push(normalized);
+    }
+  }
+
+  return { hasSection: true, tasks };
+}
+
+function upsertDailyTaskSection(markdown, tasks) {
+  const normalizedMarkdown = String(markdown ?? "").replace(/\r\n/g, "\n");
+  const lines = normalizedMarkdown ? normalizedMarkdown.split("\n") : [];
+  const normalizedTasks = (Array.isArray(tasks) ? tasks : [])
+    .map((task) => normalizeHomeCalendarTaskItem(task))
+    .filter(Boolean);
+  const sectionLines = [
+    DAILY_TASK_SECTION_HEADING,
+    ...normalizedTasks.map((task) => `- [${task.done ? "x" : " "}] ${task.text}`),
+  ];
+
+  const sectionStart = lines.findIndex((line) => /^##\s*今日任务\s*$/.test(line.trim()));
+  if (sectionStart < 0) {
+    const shouldInsertSpacer = lines.length > 0 && lines[lines.length - 1].trim() !== "";
+    const suffix = shouldInsertSpacer ? ["", ...sectionLines] : sectionLines;
+    return [...lines, ...suffix].join("\n");
+  }
+
+  let sectionEnd = lines.length;
+  for (let index = sectionStart + 1; index < lines.length; index += 1) {
+    if (/^##\s+/.test(lines[index].trim())) {
+      sectionEnd = index;
+      break;
+    }
+  }
+
+  return [...lines.slice(0, sectionStart), ...sectionLines, ...lines.slice(sectionEnd)].join("\n");
+}
+
 class GoalsDashboardPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
@@ -693,7 +780,14 @@ class GoalsDashboardPlugin extends Plugin {
     }
 
     const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
-    return Array.isArray(source[dateKey]) ? [...source[dateKey]] : [];
+    const persistedTasks = Array.isArray(source[dateKey]) ? [...source[dateKey]] : [];
+    const noteTasks = await this.readHomeCalendarTasksFromDailyNote(dateKey);
+    if (!noteTasks.hasSection) {
+      return persistedTasks;
+    }
+
+    await this.setHomeCalendarTasksByDate(dateKey, noteTasks.tasks);
+    return [...noteTasks.tasks];
   }
 
   getHomeCalendarTaskSummaryByDate() {
@@ -713,7 +807,20 @@ class GoalsDashboardPlugin extends Plugin {
   }
 
   async addHomeCalendarTask(dateKey, text) {
-    return this.addHomeCalendarTaskRange(dateKey, dateKey, text);
+    if (!parseDateKey(dateKey)) {
+      throw new Error("invalid-calendar-date");
+    }
+
+    const normalizedTask = normalizeHomeCalendarTaskItem({ text, done: false });
+    if (!normalizedTask) {
+      throw new Error("empty-calendar-task");
+    }
+
+    const tasks = await this.getHomeCalendarTasksByDate(dateKey);
+    tasks.push(normalizedTask);
+    await this.setHomeCalendarTasksByDate(dateKey, tasks);
+    await this.syncHomeCalendarTasksToDailyNote(dateKey, tasks, { createIfMissing: true });
+    return 1;
   }
 
   async addHomeCalendarTaskRange(startDateKey, endDateKey, text) {
@@ -733,6 +840,13 @@ class GoalsDashboardPlugin extends Plugin {
 
     this.settings.homeCalendarTasksByDate = nextState;
     await this.saveSettings();
+
+    for (const dateKey of dateKeys) {
+      await this.syncHomeCalendarTasksToDailyNote(dateKey, nextState[dateKey], {
+        createIfMissing: false,
+      });
+    }
+
     return dateKeys.length;
   }
 
@@ -741,8 +855,7 @@ class GoalsDashboardPlugin extends Plugin {
       throw new Error("invalid-calendar-date");
     }
 
-    const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
-    const tasks = Array.isArray(source[dateKey]) ? [...source[dateKey]] : [];
+    const tasks = await this.getHomeCalendarTasksByDate(dateKey);
     if (!tasks[index]) {
       return;
     }
@@ -752,11 +865,8 @@ class GoalsDashboardPlugin extends Plugin {
       done: Boolean(done),
     };
 
-    this.settings.homeCalendarTasksByDate = {
-      ...source,
-      [dateKey]: tasks,
-    };
-    await this.saveSettings();
+    await this.setHomeCalendarTasksByDate(dateKey, tasks);
+    await this.syncHomeCalendarTasksToDailyNote(dateKey, tasks, { createIfMissing: false });
   }
 
   async removeHomeCalendarTask(dateKey, index) {
@@ -764,23 +874,88 @@ class GoalsDashboardPlugin extends Plugin {
       throw new Error("invalid-calendar-date");
     }
 
-    const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
-    const tasks = Array.isArray(source[dateKey])
-      ? source[dateKey].filter((_, taskIndex) => taskIndex !== index)
-      : [];
+    const tasks = (await this.getHomeCalendarTasksByDate(dateKey)).filter(
+      (_, taskIndex) => taskIndex !== index,
+    );
+    await this.setHomeCalendarTasksByDate(dateKey, tasks);
+    await this.syncHomeCalendarTasksToDailyNote(dateKey, tasks, { createIfMissing: false });
+  }
 
-    if (tasks.length > 0) {
+  async setHomeCalendarTasksByDate(dateKey, tasks) {
+    const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
+    const normalizedTasks = (Array.isArray(tasks) ? tasks : [])
+      .map((task) => normalizeHomeCalendarTaskItem(task))
+      .filter(Boolean);
+    const currentTasks = Array.isArray(source[dateKey]) ? source[dateKey] : [];
+
+    if (normalizedTasks.length > 0) {
+      if (isSameHomeCalendarTasks(currentTasks, normalizedTasks)) {
+        return;
+      }
+
       this.settings.homeCalendarTasksByDate = {
         ...source,
-        [dateKey]: tasks,
+        [dateKey]: normalizedTasks,
       };
-    } else {
-      const nextState = { ...source };
-      delete nextState[dateKey];
-      this.settings.homeCalendarTasksByDate = nextState;
+      await this.saveSettings();
+      return;
     }
 
+    if (!source[dateKey]) {
+      return;
+    }
+
+    const nextState = { ...source };
+    delete nextState[dateKey];
+    this.settings.homeCalendarTasksByDate = nextState;
     await this.saveSettings();
+  }
+
+  async readHomeCalendarTasksFromDailyNote(dateKey) {
+    const date = parseDateKey(dateKey);
+    if (!date) {
+      throw new Error("invalid-calendar-date");
+    }
+
+    const path = this.getDailyNotePathByDate(date);
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!file || Array.isArray(file.children) || file.extension !== "md") {
+      return { hasSection: false, tasks: [] };
+    }
+
+    const markdown = await this.app.vault.cachedRead(file);
+    return parseDailyTaskSection(markdown);
+  }
+
+  async syncHomeCalendarTasksToDailyNote(dateKey, tasks, options = {}) {
+    const date = parseDateKey(dateKey);
+    if (!date) {
+      throw new Error("invalid-calendar-date");
+    }
+
+    const targetPath = this.getDailyNotePathByDate(date);
+    let targetFile = this.app.vault.getAbstractFileByPath(targetPath);
+
+    if (!targetFile) {
+      if (!options.createIfMissing) {
+        return;
+      }
+
+      const templateContent = await this.readDailyTemplate();
+      const folderPath = targetPath.split("/").slice(0, -1).join("/");
+      await ensureFolderExists(this.app.vault, folderPath);
+      targetFile = await this.app.vault.create(targetPath, templateContent);
+    }
+
+    if (Array.isArray(targetFile.children) || targetFile.extension !== "md") {
+      throw new Error("daily-path-conflict");
+    }
+
+    const markdown = await this.app.vault.cachedRead(targetFile);
+    const nextMarkdown = upsertDailyTaskSection(markdown, tasks);
+    if (nextMarkdown !== markdown) {
+      await this.app.vault.modify(targetFile, nextMarkdown);
+    }
   }
 
   async readDailyTemplate() {
@@ -795,7 +970,7 @@ class GoalsDashboardPlugin extends Plugin {
     return this.app.vault.cachedRead(templateFile);
   }
 
-  async openOrCreateDailyNoteByDateKey(dateKey) {
+  async openOrCreateDailyNoteByDateKey(dateKey, options = {}) {
     const date = parseDateKey(dateKey);
     if (!date) {
       throw new Error("invalid-calendar-date");
@@ -819,7 +994,9 @@ class GoalsDashboardPlugin extends Plugin {
       targetFile = await this.app.vault.create(targetPath, templateContent);
     }
 
-    const leaf = this.app.workspace.getLeaf(true);
+    const leaf = options.openInRightSplit
+      ? this.app.workspace.getLeaf("split", "vertical") || this.app.workspace.getLeaf(true)
+      : this.app.workspace.getLeaf(true);
     await leaf.openFile(targetFile, { active: true });
     this.app.workspace.revealLeaf(leaf);
 

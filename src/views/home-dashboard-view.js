@@ -8,6 +8,7 @@ class HomeDashboardView extends ItemView {
     this.plugin = plugin;
     this.refreshTimer = null;
     this.minuteTimer = null;
+    this.secondTimer = null;
   }
 
   getViewType() {
@@ -43,6 +44,13 @@ class HomeDashboardView extends ItemView {
     }, 60 * 1000);
     this.registerInterval(this.minuteTimer);
 
+    this.initializeClockState();
+    this.secondTimer = window.setInterval(() => {
+      this.tickClockState();
+      this.updateClockDisplay();
+    }, 1000);
+    this.registerInterval(this.secondTimer);
+
     await this.render();
   }
 
@@ -50,6 +58,11 @@ class HomeDashboardView extends ItemView {
     if (this.refreshTimer) {
       window.clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
+    }
+
+    if (this.secondTimer) {
+      window.clearInterval(this.secondTimer);
+      this.secondTimer = null;
     }
   }
 
@@ -87,12 +100,31 @@ class HomeDashboardView extends ItemView {
       await this.plugin.activateView();
     });
 
+    const milestoneButton = headerActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "Milestone",
+    });
+    milestoneButton.addEventListener("click", async () => {
+      await this.plugin.activateMilestoneView();
+    });
+
+    const kanbanTodoButton = headerActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "Kanban Todo",
+    });
+    kanbanTodoButton.addEventListener("click", async () => {
+      await this.plugin.activateKanbanTodoView();
+    });
+
     const grid = container.createDiv({ cls: "northstar-homepage-grid" });
     this.calendarTaskSummary = this.plugin.getHomeCalendarTaskSummaryByDate();
 
     const calendarCard = grid.createDiv({ cls: "northstar-homepage-card" });
     this.initializeCalendarState();
     this.renderLocalCalendar(calendarCard);
+
+    const clockCard = grid.createDiv({ cls: "northstar-homepage-card northstar-homepage-clock-card" });
+    this.renderClockCard(clockCard);
 
     const listCard = grid.createDiv({ cls: "northstar-homepage-card" });
     const listTop = listCard.createDiv({ cls: "northstar-homepage-card-top" });
@@ -593,7 +625,9 @@ class HomeDashboardView extends ItemView {
 
   async tryOpenCalendarDay(dateKey) {
     try {
-      const result = await this.plugin.openOrCreateDailyNoteByDateKey(dateKey);
+      const result = await this.plugin.openOrCreateDailyNoteByDateKey(dateKey, {
+        openInRightSplit: true,
+      });
       new Notice(result.created ? "Daily note created from template." : "Daily note opened.");
     } catch (error) {
       const code = String(error?.message ?? "");
@@ -683,6 +717,311 @@ class HomeDashboardView extends ItemView {
       new Notice("添加任务失败。");
       return 0;
     }
+  }
+
+  initializeClockState() {
+    if (this.clockState) {
+      return;
+    }
+
+    const focusMs = 25 * 60 * 1000;
+    this.clockState = {
+      now: Date.now(),
+      pomodoro: {
+        mode: "focus",
+        durations: {
+          focus: focusMs,
+          break: 5 * 60 * 1000,
+        },
+        running: false,
+        endAt: 0,
+        remainingMs: focusMs,
+        sessions: 0,
+      },
+      countdown: {
+        running: false,
+        endAt: 0,
+        remainingMs: 10 * 60 * 1000,
+        presetMs: 10 * 60 * 1000,
+      },
+    };
+  }
+
+  renderClockCard(card) {
+    this.initializeClockState();
+
+    const top = card.createDiv({ cls: "northstar-homepage-card-top" });
+    top.createEl("h3", { text: "时钟" });
+    top.createEl("span", {
+      cls: "northstar-homepage-card-hint",
+      text: "番茄钟 / 倒计时 / 本地时间",
+    });
+
+    const localBlock = card.createDiv({ cls: "northstar-clock-local" });
+    const localTime = localBlock.createEl("strong", { cls: "northstar-clock-local-time" });
+    const localDate = localBlock.createEl("span", { cls: "northstar-clock-local-date" });
+
+    const pomodoroBlock = card.createDiv({ cls: "northstar-clock-block" });
+    const pomodoroHeader = pomodoroBlock.createDiv({ cls: "northstar-clock-block-top" });
+    pomodoroHeader.createEl("strong", { text: "番茄钟" });
+    const pomodoroMode = pomodoroHeader.createEl("span", { cls: "northstar-clock-mode" });
+    const pomodoroTimer = pomodoroBlock.createEl("div", { cls: "northstar-clock-timer" });
+    const pomodoroSessions = pomodoroBlock.createEl("span", { cls: "northstar-clock-meta" });
+    const pomodoroProgress = pomodoroBlock.createDiv({ cls: "northstar-clock-progress" });
+    const pomodoroProgressBar = pomodoroProgress.createDiv({ cls: "northstar-clock-progress-bar" });
+
+    const pomodoroActions = pomodoroBlock.createDiv({ cls: "northstar-clock-actions" });
+    const pomodoroStartPause = pomodoroActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+    });
+    const pomodoroReset = pomodoroActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "重置",
+    });
+    const pomodoroSwitch = pomodoroActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "切换",
+    });
+
+    pomodoroStartPause.addEventListener("click", () => {
+      this.togglePomodoro();
+      this.updateClockDisplay();
+    });
+    pomodoroReset.addEventListener("click", () => {
+      this.resetPomodoro();
+      this.updateClockDisplay();
+    });
+    pomodoroSwitch.addEventListener("click", () => {
+      this.switchPomodoroMode();
+      this.updateClockDisplay();
+    });
+
+    const countdownBlock = card.createDiv({ cls: "northstar-clock-block" });
+    const countdownTop = countdownBlock.createDiv({ cls: "northstar-clock-block-top" });
+    countdownTop.createEl("strong", { text: "倒计时" });
+    const countdownHint = countdownTop.createEl("span", { cls: "northstar-clock-meta" });
+
+    const countdownPresetRow = countdownBlock.createDiv({ cls: "northstar-clock-countdown-config" });
+    const minuteInput = countdownPresetRow.createEl("input", {
+      cls: "goals-create-input",
+      type: "number",
+      min: "0",
+      max: "999",
+      step: "1",
+    });
+    minuteInput.value = String(Math.floor(this.clockState.countdown.presetMs / 60000));
+
+    const secondInput = countdownPresetRow.createEl("input", {
+      cls: "goals-create-input",
+      type: "number",
+      min: "0",
+      max: "59",
+      step: "1",
+    });
+    secondInput.value = String(Math.floor((this.clockState.countdown.presetMs % 60000) / 1000));
+
+    const applyPreset = () => {
+      const minutes = Math.max(0, Math.min(999, Number(minuteInput.value) || 0));
+      const seconds = Math.max(0, Math.min(59, Number(secondInput.value) || 0));
+      const presetMs = (minutes * 60 + seconds) * 1000;
+      if (presetMs <= 0) {
+        return;
+      }
+
+      const countdown = this.clockState.countdown;
+      countdown.presetMs = presetMs;
+      if (!countdown.running) {
+        countdown.remainingMs = presetMs;
+      }
+
+      minuteInput.value = String(minutes);
+      secondInput.value = String(seconds);
+      this.updateClockDisplay();
+    };
+
+    minuteInput.addEventListener("change", applyPreset);
+    secondInput.addEventListener("change", applyPreset);
+
+    const countdownTimer = countdownBlock.createEl("div", { cls: "northstar-clock-timer" });
+    const countdownProgress = countdownBlock.createDiv({ cls: "northstar-clock-progress" });
+    const countdownProgressBar = countdownProgress.createDiv({ cls: "northstar-clock-progress-bar" });
+
+    const countdownActions = countdownBlock.createDiv({ cls: "northstar-clock-actions" });
+    const countdownStartPause = countdownActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+    });
+    const countdownReset = countdownActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "重置",
+    });
+
+    countdownStartPause.addEventListener("click", () => {
+      this.toggleCountdown();
+      this.updateClockDisplay();
+    });
+    countdownReset.addEventListener("click", () => {
+      this.resetCountdown();
+      this.updateClockDisplay();
+    });
+
+    this.clockDom = {
+      localTime,
+      localDate,
+      pomodoroTimer,
+      pomodoroMode,
+      pomodoroSessions,
+      pomodoroProgressBar,
+      pomodoroStartPause,
+      countdownHint,
+      countdownTimer,
+      countdownProgressBar,
+      countdownStartPause,
+    };
+
+    this.updateClockDisplay();
+  }
+
+  tickClockState() {
+    this.initializeClockState();
+
+    const now = Date.now();
+    this.clockState.now = now;
+
+    const pomodoro = this.clockState.pomodoro;
+    if (pomodoro.running) {
+      const remaining = pomodoro.endAt - now;
+      if (remaining <= 0) {
+        const wasFocus = pomodoro.mode === "focus";
+        if (wasFocus) {
+          pomodoro.sessions += 1;
+        }
+
+        pomodoro.mode = wasFocus ? "break" : "focus";
+        const nextDuration = pomodoro.durations[pomodoro.mode];
+        pomodoro.remainingMs = nextDuration;
+        pomodoro.endAt = now + nextDuration;
+        new Notice(wasFocus ? "番茄钟结束，开始休息。" : "休息结束，开始新一轮专注。");
+      } else {
+        pomodoro.remainingMs = remaining;
+      }
+    }
+
+    const countdown = this.clockState.countdown;
+    if (countdown.running) {
+      const remaining = countdown.endAt - now;
+      if (remaining <= 0) {
+        countdown.running = false;
+        countdown.remainingMs = 0;
+        new Notice("倒计时结束。");
+      } else {
+        countdown.remainingMs = remaining;
+      }
+    }
+  }
+
+  updateClockDisplay() {
+    if (!this.clockDom || !this.clockState) {
+      return;
+    }
+
+    const now = new Date(this.clockState.now || Date.now());
+    this.clockDom.localTime.setText(
+      now.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+    );
+    this.clockDom.localDate.setText(
+      now.toLocaleDateString(undefined, {
+        weekday: "short",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      }),
+    );
+
+    const pomodoro = this.clockState.pomodoro;
+    const pomodoroTotal = pomodoro.durations[pomodoro.mode];
+    const pomodoroProgress = pomodoroTotal <= 0 ? 0 : 1 - pomodoro.remainingMs / pomodoroTotal;
+    this.clockDom.pomodoroTimer.setText(this.formatClockDuration(pomodoro.remainingMs));
+    this.clockDom.pomodoroMode.setText(pomodoro.mode === "focus" ? "专注" : "休息");
+    this.clockDom.pomodoroSessions.setText(`已完成轮次：${pomodoro.sessions}`);
+    this.clockDom.pomodoroStartPause.setText(pomodoro.running ? "暂停" : "开始");
+    this.clockDom.pomodoroProgressBar.style.width = `${Math.max(0, Math.min(1, pomodoroProgress)) * 100}%`;
+
+    const countdown = this.clockState.countdown;
+    const countdownTotal = Math.max(1000, countdown.presetMs);
+    const countdownProgress = countdownTotal <= 0 ? 0 : 1 - countdown.remainingMs / countdownTotal;
+    this.clockDom.countdownHint.setText(
+      `预设 ${this.formatClockDuration(countdown.presetMs, { includeHours: false })}`,
+    );
+    this.clockDom.countdownTimer.setText(this.formatClockDuration(countdown.remainingMs));
+    this.clockDom.countdownStartPause.setText(countdown.running ? "暂停" : "开始");
+    this.clockDom.countdownProgressBar.style.width = `${Math.max(0, Math.min(1, countdownProgress)) * 100}%`;
+  }
+
+  togglePomodoro() {
+    const pomodoro = this.clockState.pomodoro;
+    if (!pomodoro.running) {
+      pomodoro.running = true;
+      pomodoro.endAt = Date.now() + pomodoro.remainingMs;
+      return;
+    }
+
+    pomodoro.remainingMs = Math.max(0, pomodoro.endAt - Date.now());
+    pomodoro.running = false;
+  }
+
+  resetPomodoro() {
+    const pomodoro = this.clockState.pomodoro;
+    pomodoro.running = false;
+    pomodoro.remainingMs = pomodoro.durations[pomodoro.mode];
+    pomodoro.endAt = 0;
+  }
+
+  switchPomodoroMode() {
+    const pomodoro = this.clockState.pomodoro;
+    pomodoro.mode = pomodoro.mode === "focus" ? "break" : "focus";
+    pomodoro.running = false;
+    pomodoro.remainingMs = pomodoro.durations[pomodoro.mode];
+    pomodoro.endAt = 0;
+  }
+
+  toggleCountdown() {
+    const countdown = this.clockState.countdown;
+    if (!countdown.running) {
+      if (countdown.remainingMs <= 0) {
+        countdown.remainingMs = countdown.presetMs;
+      }
+      countdown.running = true;
+      countdown.endAt = Date.now() + countdown.remainingMs;
+      return;
+    }
+
+    countdown.remainingMs = Math.max(0, countdown.endAt - Date.now());
+    countdown.running = false;
+  }
+
+  resetCountdown() {
+    const countdown = this.clockState.countdown;
+    countdown.running = false;
+    countdown.remainingMs = countdown.presetMs;
+    countdown.endAt = 0;
+  }
+
+  formatClockDuration(ms, options = {}) {
+    const clamped = Math.max(0, Math.ceil(ms / 1000));
+    const hours = Math.floor(clamped / 3600);
+    const minutes = Math.floor((clamped % 3600) / 60);
+    const seconds = clamped % 60;
+    const includeHours = options.includeHours !== false && hours > 0;
+    if (includeHours) {
+      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    }
+
+    const totalMinutes = hours * 60 + minutes;
+    return `${String(totalMinutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   }
 }
 
