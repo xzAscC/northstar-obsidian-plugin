@@ -17,6 +17,7 @@ const DEFAULT_SETTINGS = {
   kanbanFolder: "Kanban",
   boardOrder: [],
   kanbanListOrder: ["Today"],
+  kanbanArchivedLists: [],
 };
 
 const NORTHSTAR_FORGE_COMMANDS = [

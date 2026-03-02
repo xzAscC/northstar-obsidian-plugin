@@ -357,24 +357,50 @@ class CreateKanbanTodoModal extends Modal {
 }
 
 class CreateKanbanListModal extends Modal {
-  constructor(app, onSubmit) {
+  constructor(app, onSubmit, options = {}) {
     super(app);
     this.onSubmit = onSubmit;
+    this.options = options;
     this.submitted = false;
   }
 
   onOpen() {
     const { contentEl } = this;
-    this.titleEl.setText("Add Kanban List");
+    const title = String(this.options.title ?? "Add Kanban List").trim() || "Add Kanban List";
+    const label = String(this.options.label ?? "List Name").trim() || "List Name";
+    const placeholder = String(this.options.placeholder ?? "Next").trim();
+    const submitText = String(this.options.submitText ?? "Add list").trim() || "Submit";
+    const defaultValue = String(this.options.value ?? "");
+
+    this.titleEl.setText(title);
     contentEl.empty();
     contentEl.addClass("goals-create-modal");
 
     const form = contentEl.createEl("form", { cls: "goals-create-form" });
-    const listInput = this.createInputField(form, {
-      label: "List Name",
-      placeholder: "Next",
-      required: true,
-    });
+    if (this.options.description) {
+      form.createEl("p", {
+        cls: "goals-create-description",
+        text: String(this.options.description),
+      });
+    }
+
+    const hasSuggestions =
+      Array.isArray(this.options.suggestions) && this.options.suggestions.length > 0;
+
+    const listInput = hasSuggestions
+      ? this.createInputFieldWithSuggestions(form, {
+        label,
+        placeholder,
+        required: true,
+        value: defaultValue,
+        suggestions: this.options.suggestions,
+      })
+      : this.createInputField(form, {
+        label,
+        placeholder,
+        required: true,
+        value: defaultValue,
+      });
 
     const actions = form.createDiv({ cls: "goals-create-actions" });
     const cancelButton = actions.createEl("button", {
@@ -384,7 +410,7 @@ class CreateKanbanListModal extends Modal {
     actions.createEl("button", {
       cls: "mod-cta",
       type: "submit",
-      text: "Add list",
+      text: submitText,
     });
 
     cancelButton.addEventListener("click", () => {
@@ -429,6 +455,30 @@ class CreateKanbanListModal extends Modal {
     if (config.required) {
       input.required = true;
     }
+
+    return input;
+  }
+
+  createInputFieldWithSuggestions(container, config) {
+    const field = container.createDiv({ cls: "goals-create-field" });
+    field.createEl("label", {
+      cls: "goals-create-label",
+      text: config.label,
+    });
+
+    const input = field.createEl("input", {
+      cls: "goals-create-input",
+      type: config.type || "text",
+      value: String(config.value ?? ""),
+      placeholder: config.placeholder || "",
+    });
+
+    if (config.required) {
+      input.required = true;
+    }
+
+    const datalistId = createDatalistId(config.label);
+    attachSuggestions(field, input, datalistId, config.suggestions);
 
     return input;
   }
