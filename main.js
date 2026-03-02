@@ -844,7 +844,6 @@ class GoalsDashboardPlugin extends Plugin {
         start,
         current,
         target,
-        unit: frontmatter.unit ?? "",
         due: frontmatter.due ?? "",
         status: frontmatter.status ?? "on-track",
         milestone: frontmatter.milestone ?? frontmatter.task ?? "",
@@ -1252,6 +1251,68 @@ class GoalsDashboardPlugin extends Plugin {
     });
   }
 
+  async updateKanbanTodoFields(file, updates) {
+    let nextList = "";
+
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      for (const [key, value] of Object.entries(updates || {})) {
+        if (key === "list") {
+          const listName = normalizeKanbanListName(value);
+          fm.list = listName;
+          nextList = listName;
+          continue;
+        }
+
+        if (key === "priority") {
+          fm.priority = normalizePriority(value);
+          continue;
+        }
+
+        fm[key] = value;
+      }
+    });
+
+    if (!nextList) {
+      return;
+    }
+
+    const nextListOrder = normalizeKanbanListOrder(this.settings.kanbanListOrder, [nextList]);
+    const nextArchivedLists = this.settings.kanbanArchivedLists.filter(
+      (list) => normalizeKanbanListName(list) !== nextList,
+    );
+    const listChanged = nextListOrder.join("\n") !== this.settings.kanbanListOrder.join("\n");
+    const archiveChanged = nextArchivedLists.join("\n") !== this.settings.kanbanArchivedLists.join("\n");
+
+    if (listChanged || archiveChanged) {
+      this.settings.kanbanListOrder = nextListOrder;
+      this.settings.kanbanArchivedLists = nextArchivedLists;
+      await this.saveSettings();
+    }
+  }
+
+  async updateKanbanTodoText(file, text) {
+    const line = String(text ?? "").replace(/\r?\n+/g, " ").trim();
+    if (!line) {
+      throw new Error("missing-todo-text");
+    }
+
+    const raw = await this.app.vault.cachedRead(file);
+    const lines = String(raw ?? "").split(/\r?\n/);
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const match = lines[index].match(/^(\s*[-*]\s+\[[ xX]\]\s+).+$/);
+      if (!match) {
+        continue;
+      }
+
+      lines[index] = `${match[1]}${line}`;
+      await this.app.vault.modify(file, lines.join("\n"));
+      return;
+    }
+
+    throw new Error("todo-checkbox-not-found");
+  }
+
   async setKanbanTodoDone(file, done) {
     const raw = await this.app.vault.cachedRead(file);
     const lines = String(raw ?? "").split(/\r?\n/);
@@ -1274,9 +1335,21 @@ class GoalsDashboardPlugin extends Plugin {
   async getMilestones() {
     const goals = await this.getGoals();
     const activeGoals = goals.filter((goal) => !isGoalArchived(goal));
-    if (activeGoals.length === 0) {
-      return [];
-    }
+    const grouped = new Map();
+    const ensureMilestoneBucket = (milestoneName) => {
+      if (!grouped.has(milestoneName)) {
+        grouped.set(milestoneName, {
+          name: milestoneName,
+          due: "",
+          goals: [],
+          todos: [],
+          todoOpen: 0,
+          todoDone: 0,
+        });
+      }
+
+      return grouped.get(milestoneName);
+    };
 
     const goalsWithTodos = await Promise.all(
       activeGoals.map(async (goal) => {
@@ -1285,21 +1358,9 @@ class GoalsDashboardPlugin extends Plugin {
       }),
     );
 
-    const grouped = new Map();
     for (const goal of goalsWithTodos) {
       const milestoneName = normalizeMilestone(goal.milestone);
-      if (!grouped.has(milestoneName)) {
-        grouped.set(milestoneName, {
-          name: milestoneName,
-          due: String(goal.milestoneDue ?? "").trim(),
-          goals: [],
-          todos: [],
-          todoOpen: 0,
-          todoDone: 0,
-        });
-      }
-
-      const bucket = grouped.get(milestoneName);
+      const bucket = ensureMilestoneBucket(milestoneName);
       bucket.goals.push(goal);
 
       if (!bucket.due) {
@@ -1312,6 +1373,7 @@ class GoalsDashboardPlugin extends Plugin {
           goalFile: goal.file,
           text: todo.text,
           done: todo.done,
+          source: "goal",
         });
 
         if (todo.done) {
@@ -1320,6 +1382,34 @@ class GoalsDashboardPlugin extends Plugin {
           bucket.todoOpen += 1;
         }
       }
+    }
+
+    const kanbanTodos = await this.getKanbanBoards();
+    for (const todo of kanbanTodos) {
+      const milestoneName = normalizeMilestone(todo.milestone);
+      const bucket = ensureMilestoneBucket(milestoneName);
+
+      if (!bucket.due && todo.due) {
+        bucket.due = String(todo.due).trim();
+      }
+
+      bucket.todos.push({
+        goalTitle: String(todo.goal ?? "").trim() || todo.name,
+        goalFile: todo.file,
+        text: todo.text,
+        done: todo.done,
+        source: "kanban",
+      });
+
+      if (todo.done) {
+        bucket.todoDone += 1;
+      } else {
+        bucket.todoOpen += 1;
+      }
+    }
+
+    if (grouped.size === 0) {
+      return [];
     }
 
     const milestones = Array.from(grouped.values());

@@ -614,12 +614,14 @@
 }
 
 .kanban-todo-lanes {
+  align-items: start;
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
 .kanban-todo-list-wrap {
+  align-self: start;
   background: linear-gradient(
     180deg,
     color-mix(in srgb, var(--kanban-list-bg) 96%, #202028 4%),
@@ -793,6 +795,42 @@
   padding: 3px 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.kanban-todo-quick-edit {
+  border-top: 1px dashed color-mix(in srgb, var(--kanban-row-border) 76%, transparent);
+  display: grid;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 8px;
+}
+
+.kanban-todo-quick-edit-row {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.kanban-todo-quick-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.kanban-todo-quick-edit-label {
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.kanban-todo-quick-edit-input {
+  border-radius: 8px;
+  font-size: 12px;
+  min-width: 0;
+  padding: 4px 7px;
 }
 
 .kanban-archived-section {
@@ -1155,6 +1193,10 @@
 
   .kanban-todo-row-link {
     font-size: 16px;
+  }
+
+  .kanban-todo-quick-edit-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .kanban-todo-list-top {

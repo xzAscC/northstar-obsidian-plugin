@@ -346,7 +346,6 @@ function buildGoalTemplate(values) {
     "start: 0",
     "current: 0",
     `target: ${Number(values.target) || 1}`,
-    'unit: ""',
     `due: ${toYamlString(values.due)}`,
     "status: on-track",
     'owner: ""',

@@ -97,7 +97,7 @@ class MilestoneDashboardView extends ItemView {
     if (milestones.length === 0) {
       container.createEl("p", {
         cls: "goals-dashboard-empty",
-        text: "No milestone data found in active goals.",
+        text: "No milestone data found in active goals or kanban todos.",
       });
       return;
     }
@@ -144,7 +144,7 @@ class MilestoneDashboardView extends ItemView {
       if (openTodos.length === 0) {
         card.createEl("p", {
           cls: "milestone-todo-empty",
-          text: "No open markdown todos in linked goals.",
+          text: "No open todos in this milestone.",
         });
       } else {
         const todoList = card.createDiv({ cls: "milestone-todo-list" });
@@ -158,7 +158,7 @@ class MilestoneDashboardView extends ItemView {
           });
           const openGoalButton = todoItem.createEl("button", {
             cls: "milestone-todo-goal-link",
-            text: todo.goalTitle,
+            text: todo.source === "kanban" ? `Kanban: ${todo.goalTitle}` : todo.goalTitle,
           });
           openGoalButton.addEventListener("click", async () => {
             await this.openGoalInRightPane(todo.goalFile);
