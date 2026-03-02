@@ -8,6 +8,7 @@ class HomeDashboardView extends ItemView {
     this.plugin = plugin;
     this.refreshTimer = null;
     this.minuteTimer = null;
+    this.secondTimer = null;
   }
 
   getViewType() {
@@ -35,6 +36,12 @@ class HomeDashboardView extends ItemView {
       }),
     );
 
+    this.registerEvent(
+      this.app.workspace.on("file-open", () => {
+        this.queueRefresh();
+      }),
+    );
+
     this.minuteTimer = window.setInterval(async () => {
       const result = await this.plugin.ensureHomeDailyListState();
       if (result.changed) {
@@ -43,6 +50,13 @@ class HomeDashboardView extends ItemView {
     }, 60 * 1000);
     this.registerInterval(this.minuteTimer);
 
+    this.initializeClockState();
+    this.secondTimer = window.setInterval(() => {
+      this.tickClockState();
+      this.updateClockDisplay();
+    }, 1000);
+    this.registerInterval(this.secondTimer);
+
     await this.render();
   }
 
@@ -50,6 +64,11 @@ class HomeDashboardView extends ItemView {
     if (this.refreshTimer) {
       window.clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
+    }
+
+    if (this.secondTimer) {
+      window.clearInterval(this.secondTimer);
+      this.secondTimer = null;
     }
   }
 
@@ -87,12 +106,31 @@ class HomeDashboardView extends ItemView {
       await this.plugin.activateView();
     });
 
+    const milestoneButton = headerActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "Milestone",
+    });
+    milestoneButton.addEventListener("click", async () => {
+      await this.plugin.activateMilestoneView();
+    });
+
+    const kanbanTodoButton = headerActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "Kanban Todo",
+    });
+    kanbanTodoButton.addEventListener("click", async () => {
+      await this.plugin.activateKanbanTodoView();
+    });
+
     const grid = container.createDiv({ cls: "northstar-homepage-grid" });
     this.calendarTaskSummary = this.plugin.getHomeCalendarTaskSummaryByDate();
 
     const calendarCard = grid.createDiv({ cls: "northstar-homepage-card" });
     this.initializeCalendarState();
     this.renderLocalCalendar(calendarCard);
+
+    const clockCard = grid.createDiv({ cls: "northstar-homepage-card northstar-homepage-clock-card" });
+    this.renderClockCard(clockCard);
 
     const listCard = grid.createDiv({ cls: "northstar-homepage-card" });
     const listTop = listCard.createDiv({ cls: "northstar-homepage-card-top" });
@@ -188,19 +226,96 @@ class HomeDashboardView extends ItemView {
     });
 
     const metrics = Array.isArray(metricsSnapshot.metrics) ? metricsSnapshot.metrics : [];
-    const hasAnySamples = metrics.some((metric) => Array.isArray(metric.samples) && metric.samples.length > 0);
-    if (!hasAnySamples) {
+    if (metrics.length === 0) {
       metricsCard.createEl("p", {
         cls: "goals-dashboard-empty",
-        text: "No metric data found. Fill these properties in daily notes: learningHours, exerciseDone, sleepHours, masturbation.",
+        text: "还没有配置任何指标，请到插件设置里配置 Daily metrics fields。",
       });
-    } else {
-      const formatMetricValue = (value) => {
-        if (!Number.isFinite(value)) {
-          return "-";
+    }
+    const formatMetricValue = (value) => {
+      if (!Number.isFinite(value)) {
+        return "-";
+      }
+      return Number.isInteger(value) ? String(value) : String(Number(value).toFixed(2));
+    };
+
+    if (metrics.length > 0) {
+      const todayValues = metricsSnapshot.todayValues && typeof metricsSnapshot.todayValues === "object"
+        ? metricsSnapshot.todayValues
+        : {};
+      const metricEditor = metricsCard.createDiv({ cls: "northstar-metric-editor" });
+      const metricEditorTop = metricEditor.createDiv({ cls: "northstar-metric-editor-top" });
+      metricEditorTop.createEl("strong", {
+        text: `Today ${metricsSnapshot.todayDateKey}`,
+      });
+      metricEditorTop.createSpan({
+        cls: "northstar-homepage-card-hint",
+        text: "Click or input to save instantly",
+      });
+
+      const metricEditorGrid = metricEditor.createDiv({ cls: "northstar-metric-editor-grid" });
+      metrics.forEach((metric) => {
+        const field = metricEditorGrid.createDiv({ cls: "northstar-metric-editor-field" });
+        field.createEl("span", {
+          cls: "northstar-metric-editor-label",
+          text: metric.label,
+        });
+
+        if (metric.kind === "binary") {
+          const toggle = field.createEl("button", {
+            cls: `northstar-metric-toggle${Number(todayValues[metric.id]) > 0 ? " is-active" : ""}`,
+            text: Number(todayValues[metric.id]) > 0 ? "已完成" : "未完成",
+          });
+          toggle.type = "button";
+          toggle.addEventListener("click", async () => {
+            const nextValue = Number(todayValues[metric.id]) > 0 ? 0 : 1;
+            await this.trySetTodayMetricValue(metric, nextValue);
+            this.queueRefresh();
+          });
+          return;
         }
-        return Number.isInteger(value) ? String(value) : String(Number(value).toFixed(2));
-      };
+
+        const inputRow = field.createDiv({ cls: "northstar-metric-input-row" });
+        const input = inputRow.createEl("input", {
+          cls: "goals-create-input northstar-metric-input",
+          type: "number",
+          step: "0.1",
+          placeholder: "0",
+        });
+
+        if (Number.isFinite(Number(todayValues[metric.id]))) {
+          input.value = String(Number(todayValues[metric.id]));
+        }
+
+        const saveButton = inputRow.createEl("button", {
+          cls: "northstar-daily-archive",
+          text: "保存",
+        });
+        saveButton.type = "button";
+
+        const applyNumberMetric = async () => {
+          await this.trySetTodayMetricValue(metric, input.value);
+          this.queueRefresh();
+        };
+
+        saveButton.addEventListener("click", applyNumberMetric);
+        input.addEventListener("keydown", async (event) => {
+          if (event.key !== "Enter") {
+            return;
+          }
+
+          event.preventDefault();
+          await applyNumberMetric();
+        });
+      });
+
+      const hasAnySamples = metrics.some((metric) => Array.isArray(metric.samples) && metric.samples.length > 0);
+      if (!hasAnySamples) {
+        metricsCard.createEl("p", {
+          cls: "goals-dashboard-empty",
+          text: "还没有历史数据，先在上方录入今天的数据。",
+        });
+      }
 
       const metricList = metricsCard.createDiv({ cls: "northstar-metric-list" });
       metrics.forEach((metric) => {
@@ -211,9 +326,15 @@ class HomeDashboardView extends ItemView {
           cls: "northstar-metric-name",
           text: metric.label,
         });
-        meta.createSpan({
-          cls: "northstar-metric-stats",
-          text: `latest ${formatMetricValue(metric.latest)} | avg ${formatMetricValue(metric.average)}`,
+
+        const stats = meta.createDiv({ cls: "northstar-metric-stats" });
+        stats.createSpan({
+          cls: "northstar-metric-chip",
+          text: `latest ${formatMetricValue(metric.latest)}`,
+        });
+        stats.createSpan({
+          cls: "northstar-metric-chip",
+          text: `avg ${formatMetricValue(metric.average)}`,
         });
 
         if (!Array.isArray(metric.samples) || metric.samples.length === 0) {
@@ -228,11 +349,19 @@ class HomeDashboardView extends ItemView {
         const values = metric.samples.map((sample) => sample.value);
         const maxValue = metric.kind === "binary" ? 1 : Math.max(...values, 1);
         metric.samples.forEach((sample) => {
-          const bar = sparkline.createSpan({ cls: "northstar-metric-bar" });
+          const point = sparkline.createDiv({ cls: "northstar-metric-point" });
           const ratio = maxValue <= 0 ? 0 : sample.value / maxValue;
-          const height = Math.max(0.08, Math.min(1, ratio));
-          bar.style.height = `${Math.round(height * 100)}%`;
-          bar.title = `${sample.date}: ${sample.value}`;
+          point.style.setProperty("--northstar-metric-ratio", String(Math.max(0, Math.min(1, ratio))));
+          point.title = `${sample.date}: ${sample.value}`;
+
+          point.createSpan({
+            cls: "northstar-metric-point-date",
+            text: String(sample.date).slice(5),
+          });
+          point.createSpan({
+            cls: "northstar-metric-point-value",
+            text: formatMetricValue(sample.value),
+          });
         });
       });
     }
@@ -241,6 +370,193 @@ class HomeDashboardView extends ItemView {
       cls: "northstar-homepage-card northstar-homepage-calendar-tasks-card",
     });
     await this.renderCalendarTasksCard(calendarTasksCard);
+
+    const linksRow = container.createDiv({ cls: "northstar-homepage-links-row" });
+    const bookmarkItems = this.getBookmarkedFiles();
+    const recentItems = this.getRecentFiles();
+
+    const bookmarkCard = linksRow.createDiv({ cls: "northstar-homepage-card" });
+    const recentCard = linksRow.createDiv({ cls: "northstar-homepage-card" });
+
+    this.renderBookmarkCard(bookmarkCard, bookmarkItems);
+    this.renderRecentFilesCard(recentCard, recentItems);
+    this.applyQuickListLayout(linksRow, bookmarkItems.length, recentItems.length);
+  }
+
+  renderBookmarkCard(card, bookmarkItems = this.getBookmarkedFiles()) {
+    card.addClass("northstar-homepage-list-bookmark");
+    const top = card.createDiv({ cls: "northstar-homepage-card-top" });
+    top.createEl("h3", { text: "书签" });
+    top.createEl("span", {
+      cls: "northstar-homepage-card-hint",
+      text: bookmarkItems.length > 0 ? `共 ${bookmarkItems.length} 条` : "暂无书签",
+    });
+
+    this.renderQuickFileList(card, bookmarkItems, {
+      emptyText: "还没有可打开的书签文件。",
+      titleFallback: "未命名文件",
+      variant: "bookmark",
+    });
+  }
+
+  renderRecentFilesCard(card, recentItems = this.getRecentFiles()) {
+    card.addClass("northstar-homepage-list-recent");
+    const top = card.createDiv({ cls: "northstar-homepage-card-top" });
+    top.createEl("h3", { text: "最近打开" });
+    top.createEl("span", {
+      cls: "northstar-homepage-card-hint",
+      text: recentItems.length > 0 ? `最近 ${recentItems.length} 条` : "暂无记录",
+    });
+
+    this.renderQuickFileList(card, recentItems, {
+      emptyText: "还没有最近打开的页面。",
+      titleFallback: "未命名文件",
+      variant: "recent",
+    });
+  }
+
+  applyQuickListLayout(container, bookmarkCount, recentCount) {
+    const bookmarkWeight = Math.max(0.84, Math.min(1.3, 0.84 + Math.min(bookmarkCount, 14) * 0.05));
+    const recentWeight = Math.max(0.92, Math.min(1.62, 0.92 + Math.min(recentCount, 14) * 0.05));
+    container.style.setProperty("--northstar-bookmark-col", `${bookmarkWeight.toFixed(2)}fr`);
+    container.style.setProperty("--northstar-recent-col", `${recentWeight.toFixed(2)}fr`);
+  }
+
+  renderQuickFileList(card, items, options = {}) {
+    if (!Array.isArray(items) || items.length === 0) {
+      card.createEl("p", {
+        cls: "goals-dashboard-empty",
+        text: options.emptyText || "暂无可显示内容。",
+      });
+      return;
+    }
+
+    const density = items.length >= 10 ? "dense" : items.length <= 3 ? "relaxed" : "balanced";
+    card.addClass(`northstar-homepage-list-${density}`);
+    if (options.variant) {
+      card.addClass(`northstar-homepage-list-${options.variant}`);
+    }
+
+    const list = card.createDiv({ cls: "northstar-homepage-link-list" });
+    items.forEach((item) => {
+      const button = list.createEl("button", {
+        cls: "northstar-homepage-link-item",
+      });
+      button.type = "button";
+
+      button.createSpan({
+        cls: "northstar-homepage-link-icon",
+        text: options.variant === "bookmark" ? "B" : "R",
+      });
+
+      const content = button.createDiv({ cls: "northstar-homepage-link-content" });
+      content.createSpan({
+        cls: "northstar-homepage-link-title",
+        text: String(item.title || options.titleFallback || "未命名文件"),
+      });
+      content.createSpan({
+        cls: "northstar-homepage-link-path",
+        text: item.path,
+      });
+
+      button.createSpan({
+        cls: "northstar-homepage-link-arrow",
+        text: ">",
+      });
+
+      button.addEventListener("click", async () => {
+        await this.openQuickFileByPath(item.path);
+      });
+    });
+  }
+
+  getBookmarkedFiles() {
+    const pluginEntry = this.app.internalPlugins?.plugins?.bookmarks;
+    const bookmarkPlugin = pluginEntry?.instance || this.app.internalPlugins?.getPluginById?.("bookmarks")?.instance;
+    const rootItems = Array.isArray(bookmarkPlugin?.items) ? bookmarkPlugin.items : [];
+    const files = [];
+    const seenPaths = new Set();
+
+    const visit = (items) => {
+      if (!Array.isArray(items)) {
+        return;
+      }
+
+      items.forEach((item) => {
+        if (!item || typeof item !== "object") {
+          return;
+        }
+
+        const nestedItems = Array.isArray(item.items) ? item.items : [];
+        if (nestedItems.length > 0) {
+          visit(nestedItems);
+        }
+
+        if (item.type !== "file") {
+          return;
+        }
+
+        const path = String(item.path ?? "").trim();
+        if (!path || seenPaths.has(path)) {
+          return;
+        }
+
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (!file || Array.isArray(file.children) || file.extension !== "md") {
+          return;
+        }
+
+        seenPaths.add(path);
+        files.push({
+          path,
+          title: file.basename,
+        });
+      });
+    };
+
+    visit(rootItems);
+    return files.slice(0, 30);
+  }
+
+  getRecentFiles() {
+    const recentPaths =
+      typeof this.app.workspace.getLastOpenFiles === "function"
+        ? this.app.workspace.getLastOpenFiles()
+        : [];
+    const files = [];
+    const seenPaths = new Set();
+
+    recentPaths.forEach((entryPath) => {
+      const path = String(entryPath ?? "").trim();
+      if (!path || seenPaths.has(path)) {
+        return;
+      }
+
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (!file || Array.isArray(file.children) || file.extension !== "md") {
+        return;
+      }
+
+      seenPaths.add(path);
+      files.push({
+        path,
+        title: file.basename,
+      });
+    });
+
+    return files.slice(0, 30);
+  }
+
+  async openQuickFileByPath(path) {
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!file || Array.isArray(file.children) || file.extension !== "md") {
+      new Notice("文件不存在或不是 Markdown 页面。");
+      return;
+    }
+
+    const leaf = this.app.workspace.getLeaf("split");
+    await leaf.openFile(file, { active: true });
+    this.app.workspace.revealLeaf(leaf);
   }
 
   initializeCalendarState() {
@@ -593,7 +909,9 @@ class HomeDashboardView extends ItemView {
 
   async tryOpenCalendarDay(dateKey) {
     try {
-      const result = await this.plugin.openOrCreateDailyNoteByDateKey(dateKey);
+      const result = await this.plugin.openOrCreateDailyNoteByDateKey(dateKey, {
+        openInRightSplit: true,
+      });
       new Notice(result.created ? "Daily note created from template." : "Daily note opened.");
     } catch (error) {
       const code = String(error?.message ?? "");
@@ -683,6 +1001,342 @@ class HomeDashboardView extends ItemView {
       new Notice("添加任务失败。");
       return 0;
     }
+  }
+
+  async trySetTodayMetricValue(metric, rawValue) {
+    try {
+      await this.plugin.setTodayHomeMetricValue(metric.id, rawValue);
+      new Notice(`已更新 ${metric.label}`);
+    } catch (error) {
+      const code = String(error?.message ?? "");
+      if (code === "unknown-home-metric") {
+        new Notice("指标不存在，请检查设置。", 3200);
+        return;
+      }
+
+      if (code === "invalid-home-metric-value") {
+        new Notice(metric.kind === "binary" ? "请使用 0/1 记录该指标。" : "请输入有效数字。", 3200);
+        return;
+      }
+
+      if (code === "daily-template-not-found") {
+        new Notice("未找到 daily template，请先在设置中配置。", 3200);
+        return;
+      }
+
+      if (code === "daily-path-conflict") {
+        new Notice("今日日记路径已存在同名文件夹或非 Markdown 文件。", 3200);
+        return;
+      }
+
+      console.error(error);
+      new Notice("保存 daily metric 失败。", 3200);
+    }
+  }
+
+  initializeClockState() {
+    if (this.clockState) {
+      return;
+    }
+
+    const focusMs = 25 * 60 * 1000;
+    this.clockState = {
+      now: Date.now(),
+      pomodoro: {
+        mode: "focus",
+        durations: {
+          focus: focusMs,
+          break: 5 * 60 * 1000,
+        },
+        running: false,
+        endAt: 0,
+        remainingMs: focusMs,
+        sessions: 0,
+      },
+      countdown: {
+        running: false,
+        endAt: 0,
+        remainingMs: 10 * 60 * 1000,
+        presetMs: 10 * 60 * 1000,
+      },
+    };
+  }
+
+  renderClockCard(card) {
+    this.initializeClockState();
+
+    const top = card.createDiv({ cls: "northstar-homepage-card-top" });
+    top.createEl("h3", { text: "时钟" });
+    top.createEl("span", {
+      cls: "northstar-homepage-card-hint",
+      text: "番茄钟 / 倒计时 / 本地时间",
+    });
+
+    const localBlock = card.createDiv({ cls: "northstar-clock-local" });
+    const localTime = localBlock.createEl("strong", { cls: "northstar-clock-local-time" });
+    const localDate = localBlock.createEl("span", { cls: "northstar-clock-local-date" });
+
+    const pomodoroBlock = card.createDiv({ cls: "northstar-clock-block" });
+    const pomodoroHeader = pomodoroBlock.createDiv({ cls: "northstar-clock-block-top" });
+    pomodoroHeader.createEl("strong", { text: "番茄钟" });
+    const pomodoroMode = pomodoroHeader.createEl("span", { cls: "northstar-clock-mode" });
+    const pomodoroTimer = pomodoroBlock.createEl("div", { cls: "northstar-clock-timer" });
+    const pomodoroSessions = pomodoroBlock.createEl("span", { cls: "northstar-clock-meta" });
+    const pomodoroProgress = pomodoroBlock.createDiv({ cls: "northstar-clock-progress" });
+    const pomodoroProgressBar = pomodoroProgress.createDiv({ cls: "northstar-clock-progress-bar" });
+
+    const pomodoroActions = pomodoroBlock.createDiv({ cls: "northstar-clock-actions" });
+    const pomodoroStartPause = pomodoroActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+    });
+    const pomodoroReset = pomodoroActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "重置",
+    });
+    const pomodoroSwitch = pomodoroActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "切换",
+    });
+
+    pomodoroStartPause.addEventListener("click", () => {
+      this.togglePomodoro();
+      this.updateClockDisplay();
+    });
+    pomodoroReset.addEventListener("click", () => {
+      this.resetPomodoro();
+      this.updateClockDisplay();
+    });
+    pomodoroSwitch.addEventListener("click", () => {
+      this.switchPomodoroMode();
+      this.updateClockDisplay();
+    });
+
+    const countdownBlock = card.createDiv({ cls: "northstar-clock-block" });
+    const countdownTop = countdownBlock.createDiv({ cls: "northstar-clock-block-top" });
+    countdownTop.createEl("strong", { text: "倒计时" });
+    const countdownHint = countdownTop.createEl("span", { cls: "northstar-clock-meta" });
+
+    const countdownPresetRow = countdownBlock.createDiv({ cls: "northstar-clock-countdown-config" });
+    const minuteInput = countdownPresetRow.createEl("input", {
+      cls: "goals-create-input",
+      type: "number",
+      min: "0",
+      max: "999",
+      step: "1",
+    });
+    minuteInput.value = String(Math.floor(this.clockState.countdown.presetMs / 60000));
+
+    const secondInput = countdownPresetRow.createEl("input", {
+      cls: "goals-create-input",
+      type: "number",
+      min: "0",
+      max: "59",
+      step: "1",
+    });
+    secondInput.value = String(Math.floor((this.clockState.countdown.presetMs % 60000) / 1000));
+
+    const applyPreset = () => {
+      const minutes = Math.max(0, Math.min(999, Number(minuteInput.value) || 0));
+      const seconds = Math.max(0, Math.min(59, Number(secondInput.value) || 0));
+      const presetMs = (minutes * 60 + seconds) * 1000;
+      if (presetMs <= 0) {
+        return;
+      }
+
+      const countdown = this.clockState.countdown;
+      countdown.presetMs = presetMs;
+      if (!countdown.running) {
+        countdown.remainingMs = presetMs;
+      }
+
+      minuteInput.value = String(minutes);
+      secondInput.value = String(seconds);
+      this.updateClockDisplay();
+    };
+
+    minuteInput.addEventListener("change", applyPreset);
+    secondInput.addEventListener("change", applyPreset);
+
+    const countdownTimer = countdownBlock.createEl("div", { cls: "northstar-clock-timer" });
+    const countdownProgress = countdownBlock.createDiv({ cls: "northstar-clock-progress" });
+    const countdownProgressBar = countdownProgress.createDiv({ cls: "northstar-clock-progress-bar" });
+
+    const countdownActions = countdownBlock.createDiv({ cls: "northstar-clock-actions" });
+    const countdownStartPause = countdownActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+    });
+    const countdownReset = countdownActions.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: "重置",
+    });
+
+    countdownStartPause.addEventListener("click", () => {
+      this.toggleCountdown();
+      this.updateClockDisplay();
+    });
+    countdownReset.addEventListener("click", () => {
+      this.resetCountdown();
+      this.updateClockDisplay();
+    });
+
+    this.clockDom = {
+      localTime,
+      localDate,
+      pomodoroTimer,
+      pomodoroMode,
+      pomodoroSessions,
+      pomodoroProgressBar,
+      pomodoroStartPause,
+      countdownHint,
+      countdownTimer,
+      countdownProgressBar,
+      countdownStartPause,
+    };
+
+    this.updateClockDisplay();
+  }
+
+  tickClockState() {
+    this.initializeClockState();
+
+    const now = Date.now();
+    this.clockState.now = now;
+
+    const pomodoro = this.clockState.pomodoro;
+    if (pomodoro.running) {
+      const remaining = pomodoro.endAt - now;
+      if (remaining <= 0) {
+        const wasFocus = pomodoro.mode === "focus";
+        if (wasFocus) {
+          pomodoro.sessions += 1;
+        }
+
+        pomodoro.mode = wasFocus ? "break" : "focus";
+        const nextDuration = pomodoro.durations[pomodoro.mode];
+        pomodoro.remainingMs = nextDuration;
+        pomodoro.endAt = now + nextDuration;
+        new Notice(wasFocus ? "番茄钟结束，开始休息。" : "休息结束，开始新一轮专注。");
+      } else {
+        pomodoro.remainingMs = remaining;
+      }
+    }
+
+    const countdown = this.clockState.countdown;
+    if (countdown.running) {
+      const remaining = countdown.endAt - now;
+      if (remaining <= 0) {
+        countdown.running = false;
+        countdown.remainingMs = 0;
+        new Notice("倒计时结束。");
+      } else {
+        countdown.remainingMs = remaining;
+      }
+    }
+  }
+
+  updateClockDisplay() {
+    if (!this.clockDom || !this.clockState) {
+      return;
+    }
+
+    const now = new Date(this.clockState.now || Date.now());
+    this.clockDom.localTime.setText(
+      now.toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+    );
+    this.clockDom.localDate.setText(
+      now.toLocaleDateString(undefined, {
+        weekday: "short",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      }),
+    );
+
+    const pomodoro = this.clockState.pomodoro;
+    const pomodoroTotal = pomodoro.durations[pomodoro.mode];
+    const pomodoroProgress = pomodoroTotal <= 0 ? 0 : 1 - pomodoro.remainingMs / pomodoroTotal;
+    this.clockDom.pomodoroTimer.setText(this.formatClockDuration(pomodoro.remainingMs));
+    this.clockDom.pomodoroMode.setText(pomodoro.mode === "focus" ? "专注" : "休息");
+    this.clockDom.pomodoroSessions.setText(`已完成轮次：${pomodoro.sessions}`);
+    this.clockDom.pomodoroStartPause.setText(pomodoro.running ? "暂停" : "开始");
+    this.clockDom.pomodoroProgressBar.style.width = `${Math.max(0, Math.min(1, pomodoroProgress)) * 100}%`;
+
+    const countdown = this.clockState.countdown;
+    const countdownTotal = Math.max(1000, countdown.presetMs);
+    const countdownProgress = countdownTotal <= 0 ? 0 : 1 - countdown.remainingMs / countdownTotal;
+    this.clockDom.countdownHint.setText(
+      `预设 ${this.formatClockDuration(countdown.presetMs, { includeHours: false })}`,
+    );
+    this.clockDom.countdownTimer.setText(this.formatClockDuration(countdown.remainingMs));
+    this.clockDom.countdownStartPause.setText(countdown.running ? "暂停" : "开始");
+    this.clockDom.countdownProgressBar.style.width = `${Math.max(0, Math.min(1, countdownProgress)) * 100}%`;
+  }
+
+  togglePomodoro() {
+    const pomodoro = this.clockState.pomodoro;
+    if (!pomodoro.running) {
+      pomodoro.running = true;
+      pomodoro.endAt = Date.now() + pomodoro.remainingMs;
+      return;
+    }
+
+    pomodoro.remainingMs = Math.max(0, pomodoro.endAt - Date.now());
+    pomodoro.running = false;
+  }
+
+  resetPomodoro() {
+    const pomodoro = this.clockState.pomodoro;
+    pomodoro.running = false;
+    pomodoro.remainingMs = pomodoro.durations[pomodoro.mode];
+    pomodoro.endAt = 0;
+  }
+
+  switchPomodoroMode() {
+    const pomodoro = this.clockState.pomodoro;
+    pomodoro.mode = pomodoro.mode === "focus" ? "break" : "focus";
+    pomodoro.running = false;
+    pomodoro.remainingMs = pomodoro.durations[pomodoro.mode];
+    pomodoro.endAt = 0;
+  }
+
+  toggleCountdown() {
+    const countdown = this.clockState.countdown;
+    if (!countdown.running) {
+      if (countdown.remainingMs <= 0) {
+        countdown.remainingMs = countdown.presetMs;
+      }
+      countdown.running = true;
+      countdown.endAt = Date.now() + countdown.remainingMs;
+      return;
+    }
+
+    countdown.remainingMs = Math.max(0, countdown.endAt - Date.now());
+    countdown.running = false;
+  }
+
+  resetCountdown() {
+    const countdown = this.clockState.countdown;
+    countdown.running = false;
+    countdown.remainingMs = countdown.presetMs;
+    countdown.endAt = 0;
+  }
+
+  formatClockDuration(ms, options = {}) {
+    const clamped = Math.max(0, Math.ceil(ms / 1000));
+    const hours = Math.floor(clamped / 3600);
+    const minutes = Math.floor((clamped % 3600) / 60);
+    const seconds = clamped % 60;
+    const includeHours = options.includeHours !== false && hours > 0;
+    if (includeHours) {
+      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    }
+
+    const totalMinutes = hours * 60 + minutes;
+    return `${String(totalMinutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   }
 }
 

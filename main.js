@@ -238,6 +238,172 @@ function normalizeHomeCalendarTasksByDate(rawState) {
   return normalized;
 }
 
+const DAILY_TASK_SECTION_HEADING = "## 今日任务";
+
+function isSameHomeCalendarTasks(leftTasks, rightTasks) {
+  const left = Array.isArray(leftTasks) ? leftTasks : [];
+  const right = Array.isArray(rightTasks) ? rightTasks : [];
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    const leftTask = left[index];
+    const rightTask = right[index];
+    if (!rightTask) {
+      return false;
+    }
+
+    if (leftTask.text !== rightTask.text || Boolean(leftTask.done) !== Boolean(rightTask.done)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function parseDailyTaskSection(markdown) {
+  const lines = String(markdown ?? "").replace(/\r\n/g, "\n").split("\n");
+  const sectionStart = lines.findIndex((line) => /^##\s*今日任务\s*$/.test(line.trim()));
+  if (sectionStart < 0) {
+    return { hasSection: false, tasks: [] };
+  }
+
+  let sectionEnd = lines.length;
+  for (let index = sectionStart + 1; index < lines.length; index += 1) {
+    if (/^##\s+/.test(lines[index].trim())) {
+      sectionEnd = index;
+      break;
+    }
+  }
+
+  const tasks = [];
+  for (let index = sectionStart + 1; index < sectionEnd; index += 1) {
+    const match = lines[index].match(/^\s*[-*]\s+\[([ xX])\]\s+(.+)$/);
+    if (!match) {
+      continue;
+    }
+
+    const normalized = normalizeHomeCalendarTaskItem({
+      text: match[2],
+      done: String(match[1]).toLowerCase() === "x",
+    });
+    if (normalized) {
+      tasks.push(normalized);
+    }
+  }
+
+  return { hasSection: true, tasks };
+}
+
+function upsertDailyTaskSection(markdown, tasks) {
+  const normalizedMarkdown = String(markdown ?? "").replace(/\r\n/g, "\n");
+  const lines = normalizedMarkdown ? normalizedMarkdown.split("\n") : [];
+  const normalizedTasks = (Array.isArray(tasks) ? tasks : [])
+    .map((task) => normalizeHomeCalendarTaskItem(task))
+    .filter(Boolean);
+  const sectionLines = [
+    DAILY_TASK_SECTION_HEADING,
+    ...normalizedTasks.map((task) => `- [${task.done ? "x" : " "}] ${task.text}`),
+  ];
+
+  const sectionStart = lines.findIndex((line) => /^##\s*今日任务\s*$/.test(line.trim()));
+  if (sectionStart < 0) {
+    const shouldInsertSpacer = lines.length > 0 && lines[lines.length - 1].trim() !== "";
+    const suffix = shouldInsertSpacer ? ["", ...sectionLines] : sectionLines;
+    return [...lines, ...suffix].join("\n");
+  }
+
+  let sectionEnd = lines.length;
+  for (let index = sectionStart + 1; index < lines.length; index += 1) {
+    if (/^##\s+/.test(lines[index].trim())) {
+      sectionEnd = index;
+      break;
+    }
+  }
+
+  return [...lines.slice(0, sectionStart), ...sectionLines, ...lines.slice(sectionEnd)].join("\n");
+}
+
+function normalizeHomeMetricKind(rawKind) {
+  return String(rawKind ?? "number").trim().toLowerCase() === "binary" ? "binary" : "number";
+}
+
+function sanitizeHomeMetricAliases(rawAliases) {
+  const source = Array.isArray(rawAliases)
+    ? rawAliases
+    : String(rawAliases ?? "")
+        .split(",")
+        .map((item) => item.trim());
+  return source
+    .map((alias) => String(alias ?? "").trim())
+    .filter((alias, index, list) => alias && list.indexOf(alias) === index);
+}
+
+function toHomeMetricId(seed, index) {
+  const normalized = String(seed ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || `metric-${index + 1}`;
+}
+
+function normalizeHomeMetricDefinitions(rawDefinitions) {
+  const fallback = Array.isArray(DEFAULT_SETTINGS.homeMetricDefinitions)
+    ? DEFAULT_SETTINGS.homeMetricDefinitions
+    : [];
+  const source = Array.isArray(rawDefinitions) && rawDefinitions.length > 0 ? rawDefinitions : fallback;
+  const usedIds = new Set();
+  const normalized = [];
+
+  source.forEach((item, index) => {
+    const label = String(item?.label ?? "").trim();
+    const aliases = sanitizeHomeMetricAliases(item?.aliases);
+    const kind = normalizeHomeMetricKind(item?.kind);
+    const primaryAlias = aliases[0] || label;
+    const idSeed = item?.id || primaryAlias || label;
+    let id = toHomeMetricId(idSeed, index);
+    while (usedIds.has(id)) {
+      id = `${id}-${index + 1}`;
+    }
+    usedIds.add(id);
+
+    if (!label || !primaryAlias) {
+      return;
+    }
+
+    normalized.push({
+      id,
+      label,
+      aliases: aliases.length > 0 ? aliases : [primaryAlias],
+      kind,
+    });
+  });
+
+  return normalized.length > 0
+    ? normalized
+    : normalizeHomeMetricDefinitions(DEFAULT_SETTINGS.homeMetricDefinitions);
+}
+
+function parseHomeMetricDefinitionsFromText(sourceText) {
+  const lines = String(sourceText ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const parsed = lines.map((line) => {
+    const [labelPart, kindPart, aliasesPart] = line.split("|").map((part) => String(part ?? "").trim());
+    const aliases = sanitizeHomeMetricAliases(aliasesPart || labelPart);
+    return {
+      label: labelPart,
+      kind: normalizeHomeMetricKind(kindPart),
+      aliases,
+    };
+  });
+
+  return normalizeHomeMetricDefinitions(parsed);
+}
+
 class GoalsDashboardPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
@@ -407,6 +573,7 @@ class GoalsDashboardPlugin extends Plugin {
       this.settings.homeListTemplate,
       DEFAULT_SETTINGS.homeListTemplate,
     );
+    this.settings.homeMetricDefinitions = normalizeHomeMetricDefinitions(this.settings.homeMetricDefinitions);
     this.settings.homeDailyListState = normalizeHomeDailyListState(this.settings.homeDailyListState);
     this.settings.homeCalendarTasksByDate = normalizeHomeCalendarTasksByDate(
       this.settings.homeCalendarTasksByDate,
@@ -415,6 +582,20 @@ class GoalsDashboardPlugin extends Plugin {
     if (!Array.isArray(this.settings.boardOrder)) {
       this.settings.boardOrder = [];
     }
+
+    if (!Array.isArray(this.settings.milestoneOrder)) {
+      this.settings.milestoneOrder = [];
+    }
+
+    this.settings.milestoneOrder = this.settings.milestoneOrder
+      .map((name) => normalizeMilestone(name))
+      .filter((name, index, list) => name && list.indexOf(name) === index);
+
+    this.settings.milestoneArchived = Array.isArray(this.settings.milestoneArchived)
+      ? this.settings.milestoneArchived
+          .map((name) => normalizeMilestone(name))
+          .filter((name, index, list) => name && list.indexOf(name) === index)
+      : [];
 
     const archivedLists = Array.isArray(this.settings.kanbanArchivedLists)
       ? this.settings.kanbanArchivedLists
@@ -433,6 +614,14 @@ class GoalsDashboardPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  setHomeMetricDefinitionsFromText(sourceText) {
+    this.settings.homeMetricDefinitions = parseHomeMetricDefinitionsFromText(sourceText);
+  }
+
+  getHomeMetricDefinitions() {
+    return normalizeHomeMetricDefinitions(this.settings.homeMetricDefinitions);
   }
 
   async ensureHomeDailyListState() {
@@ -534,32 +723,9 @@ class GoalsDashboardPlugin extends Plugin {
 
   async getHomeDailyMetrics() {
     const lookbackDays = 14;
-    const metrics = [
-      {
-        id: "learningHours",
-        label: "学习时间",
-        aliases: ["learningHours", "学习时间"],
-        kind: "number",
-      },
-      {
-        id: "exerciseDone",
-        label: "锻炼情况",
-        aliases: ["exerciseDone", "锻炼情况"],
-        kind: "binary",
-      },
-      {
-        id: "sleepHours",
-        label: "睡觉时间",
-        aliases: ["sleepHours", "睡觉时间"],
-        kind: "number",
-      },
-      {
-        id: "masturbation",
-        label: "撸管",
-        aliases: ["masturbation", "撸管"],
-        kind: "binary",
-      },
-    ];
+    const metrics = this.getHomeMetricDefinitions();
+    const root = normalizeFolderPath(this.settings.homeCalendarDailyRoot, DEFAULT_SETTINGS.homeCalendarDailyRoot);
+    const rootPrefix = `${root}/`;
 
     const parseMetricValue = (rawValue, kind) => {
       const numeric = Number(rawValue);
@@ -589,12 +755,14 @@ class GoalsDashboardPlugin extends Plugin {
     const endDate = new Date();
     endDate.setHours(0, 0, 0, 0);
     const startDate = new Date(endDate.getTime() - (lookbackDays - 1) * 24 * 60 * 60 * 1000);
+    const todayDateKey = formatDateKey(endDate);
 
     const allFiles = this.app.vault.getMarkdownFiles();
     const samplesByMetric = new Map(metrics.map((metric) => [metric.id, []]));
+    const todayValues = {};
 
     for (const file of allFiles) {
-      if (!String(file.path ?? "").startsWith("Daily/")) {
+      if (!String(file.path ?? "").startsWith(rootPrefix)) {
         continue;
       }
 
@@ -626,11 +794,17 @@ class GoalsDashboardPlugin extends Plugin {
           date,
           value,
         });
+
+        if (date === todayDateKey) {
+          todayValues[metric.id] = value;
+        }
       }
     }
 
     return {
       lookbackDays,
+      todayDateKey,
+      todayValues,
       metrics: metrics.map((metric) => {
         const samples = samplesByMetric
           .get(metric.id)
@@ -647,6 +821,41 @@ class GoalsDashboardPlugin extends Plugin {
         };
       }),
     };
+  }
+
+  async setTodayHomeMetricValue(metricId, rawValue) {
+    const metrics = this.getHomeMetricDefinitions();
+    const metric = metrics.find((item) => item.id === metricId);
+    if (!metric) {
+      throw new Error("unknown-home-metric");
+    }
+
+    const numeric = Number(rawValue);
+    if (!Number.isFinite(numeric)) {
+      throw new Error("invalid-home-metric-value");
+    }
+
+    const normalizedValue = metric.kind === "binary" ? (numeric > 0 ? 1 : 0) : Number(numeric.toFixed(2));
+    const date = new Date();
+    date.setHours(0, 0, 0, 0);
+    const targetPath = this.getDailyNotePathByDate(date);
+    let targetFile = this.app.vault.getAbstractFileByPath(targetPath);
+    if (!targetFile) {
+      const templateContent = await this.readDailyTemplate();
+      const folderPath = targetPath.split("/").slice(0, -1).join("/");
+      await ensureFolderExists(this.app.vault, folderPath);
+      targetFile = await this.app.vault.create(targetPath, templateContent);
+    }
+
+    if (Array.isArray(targetFile.children) || targetFile.extension !== "md") {
+      throw new Error("daily-path-conflict");
+    }
+
+    const writeKey = metric.aliases[0] || metric.id;
+
+    await this.app.fileManager.processFrontMatter(targetFile, (frontmatter) => {
+      frontmatter[writeKey] = normalizedValue;
+    });
   }
 
   getDailyNotePathByDate(date) {
@@ -693,7 +902,14 @@ class GoalsDashboardPlugin extends Plugin {
     }
 
     const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
-    return Array.isArray(source[dateKey]) ? [...source[dateKey]] : [];
+    const persistedTasks = Array.isArray(source[dateKey]) ? [...source[dateKey]] : [];
+    const noteTasks = await this.readHomeCalendarTasksFromDailyNote(dateKey);
+    if (!noteTasks.hasSection) {
+      return persistedTasks;
+    }
+
+    await this.setHomeCalendarTasksByDate(dateKey, noteTasks.tasks);
+    return [...noteTasks.tasks];
   }
 
   getHomeCalendarTaskSummaryByDate() {
@@ -713,7 +929,20 @@ class GoalsDashboardPlugin extends Plugin {
   }
 
   async addHomeCalendarTask(dateKey, text) {
-    return this.addHomeCalendarTaskRange(dateKey, dateKey, text);
+    if (!parseDateKey(dateKey)) {
+      throw new Error("invalid-calendar-date");
+    }
+
+    const normalizedTask = normalizeHomeCalendarTaskItem({ text, done: false });
+    if (!normalizedTask) {
+      throw new Error("empty-calendar-task");
+    }
+
+    const tasks = await this.getHomeCalendarTasksByDate(dateKey);
+    tasks.push(normalizedTask);
+    await this.setHomeCalendarTasksByDate(dateKey, tasks);
+    await this.syncHomeCalendarTasksToDailyNote(dateKey, tasks, { createIfMissing: true });
+    return 1;
   }
 
   async addHomeCalendarTaskRange(startDateKey, endDateKey, text) {
@@ -733,6 +962,13 @@ class GoalsDashboardPlugin extends Plugin {
 
     this.settings.homeCalendarTasksByDate = nextState;
     await this.saveSettings();
+
+    for (const dateKey of dateKeys) {
+      await this.syncHomeCalendarTasksToDailyNote(dateKey, nextState[dateKey], {
+        createIfMissing: false,
+      });
+    }
+
     return dateKeys.length;
   }
 
@@ -741,8 +977,7 @@ class GoalsDashboardPlugin extends Plugin {
       throw new Error("invalid-calendar-date");
     }
 
-    const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
-    const tasks = Array.isArray(source[dateKey]) ? [...source[dateKey]] : [];
+    const tasks = await this.getHomeCalendarTasksByDate(dateKey);
     if (!tasks[index]) {
       return;
     }
@@ -752,11 +987,8 @@ class GoalsDashboardPlugin extends Plugin {
       done: Boolean(done),
     };
 
-    this.settings.homeCalendarTasksByDate = {
-      ...source,
-      [dateKey]: tasks,
-    };
-    await this.saveSettings();
+    await this.setHomeCalendarTasksByDate(dateKey, tasks);
+    await this.syncHomeCalendarTasksToDailyNote(dateKey, tasks, { createIfMissing: false });
   }
 
   async removeHomeCalendarTask(dateKey, index) {
@@ -764,23 +996,88 @@ class GoalsDashboardPlugin extends Plugin {
       throw new Error("invalid-calendar-date");
     }
 
-    const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
-    const tasks = Array.isArray(source[dateKey])
-      ? source[dateKey].filter((_, taskIndex) => taskIndex !== index)
-      : [];
+    const tasks = (await this.getHomeCalendarTasksByDate(dateKey)).filter(
+      (_, taskIndex) => taskIndex !== index,
+    );
+    await this.setHomeCalendarTasksByDate(dateKey, tasks);
+    await this.syncHomeCalendarTasksToDailyNote(dateKey, tasks, { createIfMissing: false });
+  }
 
-    if (tasks.length > 0) {
+  async setHomeCalendarTasksByDate(dateKey, tasks) {
+    const source = normalizeHomeCalendarTasksByDate(this.settings.homeCalendarTasksByDate);
+    const normalizedTasks = (Array.isArray(tasks) ? tasks : [])
+      .map((task) => normalizeHomeCalendarTaskItem(task))
+      .filter(Boolean);
+    const currentTasks = Array.isArray(source[dateKey]) ? source[dateKey] : [];
+
+    if (normalizedTasks.length > 0) {
+      if (isSameHomeCalendarTasks(currentTasks, normalizedTasks)) {
+        return;
+      }
+
       this.settings.homeCalendarTasksByDate = {
         ...source,
-        [dateKey]: tasks,
+        [dateKey]: normalizedTasks,
       };
-    } else {
-      const nextState = { ...source };
-      delete nextState[dateKey];
-      this.settings.homeCalendarTasksByDate = nextState;
+      await this.saveSettings();
+      return;
     }
 
+    if (!source[dateKey]) {
+      return;
+    }
+
+    const nextState = { ...source };
+    delete nextState[dateKey];
+    this.settings.homeCalendarTasksByDate = nextState;
     await this.saveSettings();
+  }
+
+  async readHomeCalendarTasksFromDailyNote(dateKey) {
+    const date = parseDateKey(dateKey);
+    if (!date) {
+      throw new Error("invalid-calendar-date");
+    }
+
+    const path = this.getDailyNotePathByDate(date);
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!file || Array.isArray(file.children) || file.extension !== "md") {
+      return { hasSection: false, tasks: [] };
+    }
+
+    const markdown = await this.app.vault.cachedRead(file);
+    return parseDailyTaskSection(markdown);
+  }
+
+  async syncHomeCalendarTasksToDailyNote(dateKey, tasks, options = {}) {
+    const date = parseDateKey(dateKey);
+    if (!date) {
+      throw new Error("invalid-calendar-date");
+    }
+
+    const targetPath = this.getDailyNotePathByDate(date);
+    let targetFile = this.app.vault.getAbstractFileByPath(targetPath);
+
+    if (!targetFile) {
+      if (!options.createIfMissing) {
+        return;
+      }
+
+      const templateContent = await this.readDailyTemplate();
+      const folderPath = targetPath.split("/").slice(0, -1).join("/");
+      await ensureFolderExists(this.app.vault, folderPath);
+      targetFile = await this.app.vault.create(targetPath, templateContent);
+    }
+
+    if (Array.isArray(targetFile.children) || targetFile.extension !== "md") {
+      throw new Error("daily-path-conflict");
+    }
+
+    const markdown = await this.app.vault.cachedRead(targetFile);
+    const nextMarkdown = upsertDailyTaskSection(markdown, tasks);
+    if (nextMarkdown !== markdown) {
+      await this.app.vault.modify(targetFile, nextMarkdown);
+    }
   }
 
   async readDailyTemplate() {
@@ -795,7 +1092,7 @@ class GoalsDashboardPlugin extends Plugin {
     return this.app.vault.cachedRead(templateFile);
   }
 
-  async openOrCreateDailyNoteByDateKey(dateKey) {
+  async openOrCreateDailyNoteByDateKey(dateKey, options = {}) {
     const date = parseDateKey(dateKey);
     if (!date) {
       throw new Error("invalid-calendar-date");
@@ -819,7 +1116,9 @@ class GoalsDashboardPlugin extends Plugin {
       targetFile = await this.app.vault.create(targetPath, templateContent);
     }
 
-    const leaf = this.app.workspace.getLeaf(true);
+    const leaf = options.openInRightSplit
+      ? this.app.workspace.getLeaf("split", "vertical") || this.app.workspace.getLeaf(true)
+      : this.app.workspace.getLeaf(true);
     await leaf.openFile(targetFile, { active: true });
     this.app.workspace.revealLeaf(leaf);
 
@@ -1047,6 +1346,11 @@ class GoalsDashboardPlugin extends Plugin {
   async updateGoalFields(file, updates) {
     await this.app.fileManager.processFrontMatter(file, (fm) => {
       for (const [key, value] of Object.entries(updates)) {
+        if (key === "due" || key === "milestoneDue") {
+          fm[key] = normalizeDateString(value);
+          continue;
+        }
+
         fm[key] = value;
       }
     });
@@ -1071,7 +1375,7 @@ class GoalsDashboardPlugin extends Plugin {
     const content = buildGoalTemplate({
       board: normalizeBoard(payload.board),
       metric: String(payload.metric ?? "").trim(),
-      due: String(payload.due ?? "").trim(),
+      due: normalizeDateString(payload.due),
       target: targetValue,
     });
 
@@ -1294,6 +1598,53 @@ class GoalsDashboardPlugin extends Plugin {
     };
   }
 
+  isMilestoneArchived(name) {
+    const milestoneName = normalizeMilestone(name);
+    return this.settings.milestoneArchived.includes(milestoneName);
+  }
+
+  async archiveMilestone(name) {
+    const milestoneName = normalizeMilestone(name);
+    if (this.settings.milestoneArchived.includes(milestoneName)) {
+      return {
+        name: milestoneName,
+        archived: false,
+      };
+    }
+
+    this.settings.milestoneOrder = [...this.settings.milestoneOrder, milestoneName].filter(
+      (item, index, list) => item && list.indexOf(item) === index,
+    );
+    this.settings.milestoneArchived = [...this.settings.milestoneArchived, milestoneName].filter(
+      (item, index, list) => item && list.indexOf(item) === index,
+    );
+    await this.saveSettings();
+
+    return {
+      name: milestoneName,
+      archived: true,
+    };
+  }
+
+  async unarchiveMilestone(name) {
+    const milestoneName = normalizeMilestone(name);
+    const nextArchived = this.settings.milestoneArchived.filter((item) => item !== milestoneName);
+    if (nextArchived.join("\n") === this.settings.milestoneArchived.join("\n")) {
+      return {
+        name: milestoneName,
+        unarchived: false,
+      };
+    }
+
+    this.settings.milestoneArchived = nextArchived;
+    await this.saveSettings();
+
+    return {
+      name: milestoneName,
+      unarchived: true,
+    };
+  }
+
   async getGoalTodos(file) {
     const raw = await this.app.vault.cachedRead(file);
     return extractTodoItems(raw);
@@ -1424,6 +1775,11 @@ class GoalsDashboardPlugin extends Plugin {
           continue;
         }
 
+        if (key === "due") {
+          fm.due = normalizeDateString(value);
+          continue;
+        }
+
         fm[key] = value;
       }
     });
@@ -1447,6 +1803,10 @@ class GoalsDashboardPlugin extends Plugin {
   }
 
   async updateKanbanTodoText(file, text) {
+    await this.updateCheckboxTodoText(file, 0, text);
+  }
+
+  async updateCheckboxTodoText(file, todoIndex, text) {
     const line = String(text ?? "").replace(/\r?\n+/g, " ").trim();
     if (!line) {
       throw new Error("missing-todo-text");
@@ -1454,10 +1814,17 @@ class GoalsDashboardPlugin extends Plugin {
 
     const raw = await this.app.vault.cachedRead(file);
     const lines = String(raw ?? "").split(/\r?\n/);
+    const targetIndex = Number.isFinite(todoIndex) ? Math.max(0, Math.floor(todoIndex)) : 0;
+    let checkboxIndex = 0;
 
     for (let index = 0; index < lines.length; index += 1) {
       const match = lines[index].match(/^(\s*[-*]\s+\[[ xX]\]\s+).+$/);
       if (!match) {
+        continue;
+      }
+
+      if (checkboxIndex !== targetIndex) {
+        checkboxIndex += 1;
         continue;
       }
 
@@ -1470,13 +1837,24 @@ class GoalsDashboardPlugin extends Plugin {
   }
 
   async setKanbanTodoDone(file, done) {
+    await this.setCheckboxTodoDone(file, 0, done);
+  }
+
+  async setCheckboxTodoDone(file, todoIndex, done) {
     const raw = await this.app.vault.cachedRead(file);
     const lines = String(raw ?? "").split(/\r?\n/);
     const targetState = done ? "x" : " ";
+    const targetIndex = Number.isFinite(todoIndex) ? Math.max(0, Math.floor(todoIndex)) : 0;
+    let checkboxIndex = 0;
 
     for (let index = 0; index < lines.length; index += 1) {
       const match = lines[index].match(/^(\s*[-*]\s+)\[([ xX])\](\s+.+)$/);
       if (!match) {
+        continue;
+      }
+
+      if (checkboxIndex !== targetIndex) {
+        checkboxIndex += 1;
         continue;
       }
 
@@ -1528,6 +1906,8 @@ class GoalsDashboardPlugin extends Plugin {
           goalTitle: goal.title,
           goalFile: goal.file,
           text: todo.text,
+          todoFile: goal.file,
+          todoIndex: Number.isFinite(todo.index) ? todo.index : 0,
           done: todo.done,
           source: "goal",
         });
@@ -1553,6 +1933,8 @@ class GoalsDashboardPlugin extends Plugin {
         goalTitle: String(todo.goal ?? "").trim() || todo.name,
         goalFile: todo.file,
         text: todo.text,
+        todoFile: todo.file,
+        todoIndex: 0,
         done: todo.done,
         source: "kanban",
       });

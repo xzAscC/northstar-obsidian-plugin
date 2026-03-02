@@ -9,6 +9,32 @@ const DEFAULT_SETTINGS = {
   homeCalendarDailyTemplatePath: "Daily/templates/daily-template.md",
   homeCalendarLookaheadDays: 7,
   homeListTemplate: "Plan top task\nReview calendar\nMove body",
+  homeMetricDefinitions: [
+    {
+      id: "learning-hours",
+      label: "学习时间",
+      aliases: ["learningHours", "学习时间"],
+      kind: "number",
+    },
+    {
+      id: "exercise-done",
+      label: "锻炼情况",
+      aliases: ["exerciseDone", "锻炼情况"],
+      kind: "binary",
+    },
+    {
+      id: "sleep-hours",
+      label: "睡眠时间",
+      aliases: ["sleepHours", "睡眠时间"],
+      kind: "number",
+    },
+    {
+      id: "masturbation",
+      label: "撸管",
+      aliases: ["masturbation", "撸管"],
+      kind: "binary",
+    },
+  ],
   homeDailyListState: {
     resetKey: "",
     items: [],
@@ -17,6 +43,8 @@ const DEFAULT_SETTINGS = {
   goalsFolder: "Goals",
   kanbanFolder: "Kanban",
   boardOrder: [],
+  milestoneOrder: [],
+  milestoneArchived: [],
   kanbanListOrder: ["Today"],
   kanbanArchivedLists: [],
 };

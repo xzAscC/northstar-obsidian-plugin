@@ -475,15 +475,6 @@ class GoalsDashboardView extends ItemView {
       },
     });
 
-    this.createQuickEditInput(rowTwo, {
-      label: "Due",
-      value: String(goal.due || ""),
-      placeholder: "YYYY-MM-DD",
-      onCommit: async (value) => {
-        await this.saveGoalField(goal.file, "due", String(value || "").trim());
-      },
-    });
-
     const rowThree = container.createDiv({ cls: "goal-quick-edit-row" });
     this.createQuickEditInputWithSuggestions(rowThree, {
       label: "Milestone",

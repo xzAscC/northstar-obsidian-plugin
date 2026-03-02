@@ -9,6 +9,26 @@ const {
   normalizeHomeListTemplate,
 } = require("./utils");
 
+function formatHomeMetricDefinitions(definitions) {
+  return (Array.isArray(definitions) ? definitions : [])
+    .map((item) => {
+      const label = String(item?.label ?? "").trim();
+      const kind = String(item?.kind ?? "number").trim().toLowerCase() === "binary" ? "binary" : "number";
+      const aliases = Array.isArray(item?.aliases)
+        ? item.aliases
+            .map((alias) => String(alias ?? "").trim())
+            .filter(Boolean)
+        : [];
+      if (!label || aliases.length === 0) {
+        return "";
+      }
+
+      return `${label} | ${kind} | ${aliases.join(",")}`;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
 class GoalsDashboardSettingTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
@@ -123,6 +143,25 @@ class GoalsDashboardSettingTab extends PluginSettingTab {
           });
 
         text.inputEl.rows = 5;
+        text.inputEl.addClass("northstar-settings-textarea");
+        return text;
+      });
+
+    new Setting(containerEl)
+      .setName("Daily metrics fields")
+      .setDesc(
+        "One metric per line. Format: Label | number/binary | key1,key2 . First key is used for writing today.",
+      )
+      .addTextArea((text) => {
+        text
+          .setPlaceholder("学习时间 | number | learningHours,学习时间")
+          .setValue(formatHomeMetricDefinitions(this.plugin.settings.homeMetricDefinitions))
+          .onChange(async (value) => {
+            this.plugin.setHomeMetricDefinitionsFromText(value);
+            await this.plugin.saveSettings();
+          });
+
+        text.inputEl.rows = 6;
         text.inputEl.addClass("northstar-settings-textarea");
         return text;
       });
