@@ -44,6 +44,7 @@ const DEFAULT_SETTINGS = {
   kanbanFolder: "Kanban",
   boardOrder: [],
   milestoneOrder: [],
+  milestoneRanges: {},
   milestoneArchived: [],
   kanbanListOrder: ["Today"],
   kanbanArchivedLists: [],

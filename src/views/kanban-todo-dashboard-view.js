@@ -223,6 +223,20 @@ class KanbanTodoDashboardView extends ItemView {
         continue;
       }
 
+      let draggingTodoPath = "";
+      let activeDropRow = null;
+      let activeDropPosition = "before";
+
+      const clearDropIndicators = () => {
+        if (!activeDropRow) {
+          return;
+        }
+
+        activeDropRow.removeClass("is-drop-before");
+        activeDropRow.removeClass("is-drop-after");
+        activeDropRow = null;
+      };
+
       for (const todo of visibleTodos) {
         const row = list.createDiv({
           cls: `kanban-todo-row${todo.done ? " is-done" : ""}`,
@@ -237,6 +251,86 @@ class KanbanTodoDashboardView extends ItemView {
         checkbox.addEventListener("click", async (event) => {
           event.preventDefault();
           await this.toggleTodoState(todo.file, todo.done);
+        });
+
+        const dragHandle = row.createEl("button", {
+          cls: "kanban-todo-row-drag",
+        });
+        dragHandle.ariaLabel = `Drag to reorder ${todo.name}`;
+        dragHandle.draggable = true;
+        setIcon(dragHandle, "grip-vertical");
+
+        dragHandle.addEventListener("dragstart", (event) => {
+          draggingTodoPath = todo.file.path;
+          row.addClass("is-dragging");
+          if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", todo.file.path);
+          }
+        });
+
+        dragHandle.addEventListener("dragend", () => {
+          draggingTodoPath = "";
+          row.removeClass("is-dragging");
+          clearDropIndicators();
+        });
+
+        row.addEventListener("dragover", (event) => {
+          if (!draggingTodoPath || draggingTodoPath === todo.file.path) {
+            return;
+          }
+
+          event.preventDefault();
+          const rect = row.getBoundingClientRect();
+          const isBefore = event.clientY < rect.top + rect.height / 2;
+          activeDropPosition = isBefore ? "before" : "after";
+
+          if (activeDropRow && activeDropRow !== row) {
+            clearDropIndicators();
+          }
+
+          activeDropRow = row;
+          row.classList.toggle("is-drop-before", isBefore);
+          row.classList.toggle("is-drop-after", !isBefore);
+        });
+
+        row.addEventListener("dragleave", (event) => {
+          if (activeDropRow !== row) {
+            return;
+          }
+
+          const nextTarget = event.relatedTarget;
+          if (nextTarget instanceof Node && row.contains(nextTarget)) {
+            return;
+          }
+
+          clearDropIndicators();
+        });
+
+        row.addEventListener("drop", async (event) => {
+          if (!draggingTodoPath || draggingTodoPath === todo.file.path) {
+            return;
+          }
+
+          event.preventDefault();
+          const fromIndex = visibleTodos.findIndex((item) => item.file.path === draggingTodoPath);
+          const targetIndex = visibleTodos.findIndex((item) => item.file.path === todo.file.path);
+          if (fromIndex < 0 || targetIndex < 0) {
+            clearDropIndicators();
+            return;
+          }
+
+          let toIndex = targetIndex;
+          if (activeDropPosition === "after") {
+            toIndex += 1;
+          }
+          if (fromIndex < toIndex) {
+            toIndex -= 1;
+          }
+
+          const clampedIndex = Math.max(0, Math.min(toIndex, visibleTodos.length - 1));
+          clearDropIndicators();
+          await this.moveTodoWithinList(listName, visibleTodos, fromIndex, clampedIndex);
         });
 
         const body = row.createDiv({ cls: "kanban-todo-body" });
@@ -318,6 +412,25 @@ class KanbanTodoDashboardView extends ItemView {
         console.error(error);
         new Notice("Failed to update todo status.");
       }
+    }
+  }
+
+  async moveTodoWithinList(listName, visibleTodos, fromIndex, toIndex) {
+    const todos = Array.isArray(visibleTodos) ? [...visibleTodos] : [];
+    if (fromIndex < 0 || fromIndex >= todos.length || toIndex < 0 || toIndex >= todos.length) {
+      return;
+    }
+
+    const [moved] = todos.splice(fromIndex, 1);
+    todos.splice(toIndex, 0, moved);
+    const orderedPaths = todos.map((todo) => todo.file.path);
+
+    try {
+      await this.plugin.reorderKanbanTodosInList(listName, orderedPaths);
+      await this.render();
+    } catch (error) {
+      console.error(error);
+      new Notice("Failed to reorder todos.");
     }
   }
 

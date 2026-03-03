@@ -36,6 +36,7 @@ status: on-track
 
 owner: xu
 milestone: 全年里程碑
+milestoneStart: 2026-01-01
 milestoneDue: 2027-01-01
 milestonePercent: 0
 
@@ -60,7 +61,7 @@ boardArchived: false
 - `Status`：读取 `status`，如 `on-track` / `at-risk` / `off-track`。
 - 评论数：统计 `## Comments` 下的无序列表项。
 - 右侧圆形头像：读取 `owner` 或 `assignee` 的首字母。
-- 底部里程碑条：`milestone`、`milestoneDue`、`milestonePercent`。
+- 底部里程碑条：`milestone`、`milestoneStart`、`milestoneDue`、`milestonePercent`。
 
 `milestonePercent` 也可不写，改用这组字段自动算：
 

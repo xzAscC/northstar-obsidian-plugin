@@ -104,6 +104,85 @@ class MilestoneDashboardView extends ItemView {
     return "is-size-regular";
   }
 
+  formatMilestoneTimeRange(milestone) {
+    const start = String(milestone.start ?? "").trim();
+    const end = String(milestone.due ?? "").trim();
+    if (start && end) {
+      return start === end ? start : `${start} ~ ${end}`;
+    }
+
+    return start || end;
+  }
+
+  createMilestoneRangeEditor(container, milestone) {
+    const editor = container.createDiv({ cls: "milestone-range-editor" });
+
+    this.createMilestoneRangeInput(editor, {
+      label: "Start",
+      value: String(milestone.start || ""),
+      onCommit: async (value) => {
+        await this.plugin.updateMilestoneRange(milestone.name, {
+          start: String(value || "").trim(),
+        });
+      },
+    });
+
+    this.createMilestoneRangeInput(editor, {
+      label: "End",
+      value: String(milestone.due || ""),
+      onCommit: async (value) => {
+        await this.plugin.updateMilestoneRange(milestone.name, {
+          due: String(value || "").trim(),
+        });
+      },
+    });
+  }
+
+  createMilestoneRangeInput(container, config) {
+    const field = container.createDiv({ cls: "milestone-range-field" });
+    field.createEl("label", {
+      cls: "milestone-range-label",
+      text: config.label,
+    });
+
+    const input = field.createEl("input", {
+      cls: "milestone-range-input",
+      type: "date",
+      value: String(config.value ?? ""),
+    });
+
+    const commit = async () => {
+      const nextValue = String(input.value ?? "").trim();
+      const currentValue = String(config.value ?? "").trim();
+      if (nextValue === currentValue) {
+        return;
+      }
+
+      await this.tryUpdateMilestoneRange(config.onCommit, nextValue);
+    };
+
+    input.addEventListener("change", commit);
+    input.addEventListener("keydown", async (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+
+      event.preventDefault();
+      await commit();
+    });
+  }
+
+  async tryUpdateMilestoneRange(commitFn, value) {
+    try {
+      await commitFn(value);
+      await this.render();
+    } catch (error) {
+      console.error(error);
+      new Notice("Failed to update milestone range.");
+      await this.render();
+    }
+  }
+
   enableMilestoneDragAndDrop(laneEl, milestoneName, visibleOrder) {
     laneEl.setAttribute("draggable", "true");
     laneEl.dataset.milestone = milestoneName;
@@ -361,12 +440,15 @@ class MilestoneDashboardView extends ItemView {
         text: `Open ${milestone.todoOpen}`,
       });
 
-      if (milestone.due) {
+      const timeRange = this.formatMilestoneTimeRange(milestone);
+      if (timeRange) {
         stats.createEl("span", {
           cls: "milestone-stat-chip",
-          text: `Due ${milestone.due}`,
+          text: `Range ${timeRange}`,
         });
       }
+
+      this.createMilestoneRangeEditor(top, milestone);
 
       const goalsList = card.createDiv({ cls: "milestone-goal-pill-list" });
       for (const goal of milestone.goals) {

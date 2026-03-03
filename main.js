@@ -405,6 +405,30 @@ function parseHomeMetricDefinitionsFromText(sourceText) {
   return normalizeHomeMetricDefinitions(parsed);
 }
 
+function normalizeMilestoneRanges(rawRanges) {
+  if (!rawRanges || typeof rawRanges !== "object" || Array.isArray(rawRanges)) {
+    return {};
+  }
+
+  const normalized = {};
+  for (const [rawName, rawRange] of Object.entries(rawRanges)) {
+    const milestoneName = normalizeMilestone(rawName);
+    if (!milestoneName) {
+      continue;
+    }
+
+    const start = normalizeDateString(rawRange?.start);
+    const due = normalizeDateString(rawRange?.due);
+    if (!start && !due) {
+      continue;
+    }
+
+    normalized[milestoneName] = { start, due };
+  }
+
+  return normalized;
+}
+
 class GoalsDashboardPlugin extends Plugin {
   async onload() {
     await this.loadSettings();
@@ -591,6 +615,8 @@ class GoalsDashboardPlugin extends Plugin {
     this.settings.milestoneOrder = this.settings.milestoneOrder
       .map((name) => normalizeMilestone(name))
       .filter((name, index, list) => name && list.indexOf(name) === index);
+
+    this.settings.milestoneRanges = normalizeMilestoneRanges(this.settings.milestoneRanges);
 
     this.settings.milestoneArchived = Array.isArray(this.settings.milestoneArchived)
       ? this.settings.milestoneArchived
@@ -1303,6 +1329,7 @@ class GoalsDashboardPlugin extends Plugin {
         due: frontmatter.due ?? "",
         status: frontmatter.status ?? "on-track",
         milestone: frontmatter.milestone ?? frontmatter.task ?? "",
+        milestoneStart: frontmatter.milestoneStart ?? frontmatter.taskStart ?? "",
         milestoneDue: frontmatter.milestoneDue ?? frontmatter.taskDue ?? "",
         percent,
         archived: isTruthy(frontmatter.archived),
@@ -1347,7 +1374,7 @@ class GoalsDashboardPlugin extends Plugin {
   async updateGoalFields(file, updates) {
     await this.app.fileManager.processFrontMatter(file, (fm) => {
       for (const [key, value] of Object.entries(updates)) {
-        if (key === "due" || key === "milestoneDue") {
+        if (key === "due" || key === "milestoneStart" || key === "milestoneDue") {
           fm[key] = normalizeDateString(value);
           continue;
         }
@@ -1407,6 +1434,11 @@ class GoalsDashboardPlugin extends Plugin {
 
     const sanitizedBaseName = sanitizeFileName(name) || `todo-${Date.now()}`;
     const filePath = getUniquePath(this.app.vault, kanbanFolder, sanitizedBaseName);
+    const existingTodos = await this.getKanbanBoards();
+    const maxOrderInList = existingTodos
+      .filter((todo) => todo.list === list && Number.isFinite(todo.order))
+      .reduce((maxOrder, todo) => Math.max(maxOrder, Number(todo.order)), -1);
+    const nextOrder = maxOrderInList + 1;
     const content = buildKanbanTodoTemplate({
       text: text || name,
       list,
@@ -1415,6 +1447,7 @@ class GoalsDashboardPlugin extends Plugin {
       priority: payload.priority,
       due: payload.due,
       tags: payload.tags,
+      order: nextOrder,
       planHours: payload.planHours,
       hoursLeft: payload.hoursLeft,
     });
@@ -1640,6 +1673,29 @@ class GoalsDashboardPlugin extends Plugin {
     };
   }
 
+  async updateMilestoneRange(name, updates) {
+    const milestoneName = normalizeMilestone(name);
+    const currentRanges = normalizeMilestoneRanges(this.settings.milestoneRanges);
+    const current = currentRanges[milestoneName] || { start: "", due: "" };
+    const next = {
+      start: Object.prototype.hasOwnProperty.call(updates || {}, "start")
+        ? normalizeDateString(updates.start)
+        : current.start,
+      due: Object.prototype.hasOwnProperty.call(updates || {}, "due")
+        ? normalizeDateString(updates.due)
+        : current.due,
+    };
+
+    if (!next.start && !next.due) {
+      delete currentRanges[milestoneName];
+    } else {
+      currentRanges[milestoneName] = next;
+    }
+
+    this.settings.milestoneRanges = currentRanges;
+    await this.saveSettings();
+  }
+
   async getGoalTodos(file) {
     const raw = await this.app.vault.cachedRead(file);
     return extractTodoItems(raw);
@@ -1691,6 +1747,7 @@ class GoalsDashboardPlugin extends Plugin {
         priority: metadata.priority,
         due: metadata.due,
         tags: metadata.tags,
+        order: metadata.order,
         planHours: metadata.planHours,
         hoursLeft: metadata.hoursLeft,
       });
@@ -1710,6 +1767,12 @@ class GoalsDashboardPlugin extends Plugin {
 
       if (left.done !== right.done) {
         return Number(left.done) - Number(right.done);
+      }
+
+      const leftOrder = Number.isFinite(left.order) ? Number(left.order) : Number.MAX_SAFE_INTEGER;
+      const rightOrder = Number.isFinite(right.order) ? Number(right.order) : Number.MAX_SAFE_INTEGER;
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
       }
 
       return String(left.name).localeCompare(String(right.name));
@@ -1754,6 +1817,10 @@ class GoalsDashboardPlugin extends Plugin {
         fm.tags = normalizeTagList(metadata.tags);
       }
 
+      if (!Object.prototype.hasOwnProperty.call(fm, "order")) {
+        fm.order = Number.isFinite(metadata.order) ? metadata.order : 0;
+      }
+
       if (!Object.prototype.hasOwnProperty.call(fm, "planHours")) {
         fm.planHours = Number.isFinite(metadata.planHours) ? metadata.planHours : 0;
       }
@@ -1770,13 +1837,21 @@ class GoalsDashboardPlugin extends Plugin {
 
   async updateKanbanTodoFields(file, updates) {
     let nextList = "";
+    let moveListChanged = false;
 
     await this.app.fileManager.processFrontMatter(file, (fm) => {
       for (const [key, value] of Object.entries(updates || {})) {
         if (key === "list") {
           const listName = normalizeKanbanListName(value);
+          moveListChanged = normalizeKanbanListName(fm.list) !== listName;
           fm.list = listName;
           nextList = listName;
+          continue;
+        }
+
+        if (key === "order") {
+          const orderRaw = Number(value);
+          fm.order = Number.isFinite(orderRaw) && orderRaw >= 0 ? Math.floor(orderRaw) : 0;
           continue;
         }
 
@@ -1832,6 +1907,10 @@ class GoalsDashboardPlugin extends Plugin {
       return;
     }
 
+    if (moveListChanged) {
+      await this.moveKanbanTodoToListEnd(file, nextList);
+    }
+
     const nextListOrder = normalizeKanbanListOrder(this.settings.kanbanListOrder, [nextList]);
     const nextArchivedLists = this.settings.kanbanArchivedLists.filter(
       (list) => normalizeKanbanListName(list) !== nextList,
@@ -1843,6 +1922,55 @@ class GoalsDashboardPlugin extends Plugin {
       this.settings.kanbanListOrder = nextListOrder;
       this.settings.kanbanArchivedLists = nextArchivedLists;
       await this.saveSettings();
+    }
+  }
+
+  async moveKanbanTodoToListEnd(file, listName) {
+    const normalizedList = normalizeKanbanListName(listName);
+    const todos = await this.getKanbanBoards();
+    const maxOrderInList = todos
+      .filter((todo) => todo.list === normalizedList && todo.file.path !== file.path && Number.isFinite(todo.order))
+      .reduce((maxOrder, todo) => Math.max(maxOrder, Number(todo.order)), -1);
+
+    await this.app.fileManager.processFrontMatter(file, (fm) => {
+      fm.order = maxOrderInList + 1;
+    });
+  }
+
+  async reorderKanbanTodosInList(listName, orderedTodoPaths) {
+    const normalizedList = normalizeKanbanListName(listName);
+    const todos = await this.getKanbanBoards();
+    const listTodos = todos.filter((todo) => todo.list === normalizedList);
+    if (listTodos.length === 0) {
+      return;
+    }
+
+    const pathSet = new Set(
+      (Array.isArray(orderedTodoPaths) ? orderedTodoPaths : [])
+        .map((todoPath) => String(todoPath ?? "").trim())
+        .filter(Boolean),
+    );
+
+    const orderedOpenTodos = (Array.isArray(orderedTodoPaths) ? orderedTodoPaths : [])
+      .map((todoPath) => listTodos.find((todo) => todo.file.path === String(todoPath ?? "").trim()))
+      .filter((todo) => todo && !todo.done);
+
+    const untouchedOpenTodos = listTodos
+      .filter((todo) => !todo.done)
+      .filter((todo) => !pathSet.has(todo.file.path));
+
+    const doneTodos = listTodos.filter((todo) => todo.done);
+    const finalOrder = [...orderedOpenTodos, ...untouchedOpenTodos, ...doneTodos];
+
+    for (let index = 0; index < finalOrder.length; index += 1) {
+      const todo = finalOrder[index];
+      if (Number.isFinite(todo.order) && Number(todo.order) === index) {
+        continue;
+      }
+
+      await this.app.fileManager.processFrontMatter(todo.file, (fm) => {
+        fm.order = index;
+      });
     }
   }
 
@@ -1914,10 +2042,12 @@ class GoalsDashboardPlugin extends Plugin {
     const goals = await this.getGoals();
     const activeGoals = goals.filter((goal) => !isGoalArchived(goal));
     const grouped = new Map();
+    const milestoneRanges = normalizeMilestoneRanges(this.settings.milestoneRanges);
     const ensureMilestoneBucket = (milestoneName) => {
       if (!grouped.has(milestoneName)) {
         grouped.set(milestoneName, {
           name: milestoneName,
+          start: "",
           due: "",
           goals: [],
           todos: [],
@@ -1941,8 +2071,14 @@ class GoalsDashboardPlugin extends Plugin {
       const bucket = ensureMilestoneBucket(milestoneName);
       bucket.goals.push(goal);
 
-      if (!bucket.due) {
-        bucket.due = String(goal.milestoneDue ?? "").trim();
+      const milestoneStart = String(goal.milestoneStart ?? "").trim();
+      if (milestoneStart && (!bucket.start || compareDue(milestoneStart, bucket.start) < 0)) {
+        bucket.start = milestoneStart;
+      }
+
+      const milestoneDue = String(goal.milestoneDue ?? "").trim();
+      if (milestoneDue && (!bucket.due || compareDue(milestoneDue, bucket.due) > 0)) {
+        bucket.due = milestoneDue;
       }
 
       for (const todo of goal.todos) {
@@ -1969,8 +2105,9 @@ class GoalsDashboardPlugin extends Plugin {
       const milestoneName = normalizeMilestone(todo.milestone);
       const bucket = ensureMilestoneBucket(milestoneName);
 
-      if (!bucket.due && todo.due) {
-        bucket.due = String(todo.due).trim();
+      const todoDue = String(todo.due ?? "").trim();
+      if (todoDue && (!bucket.due || compareDue(todoDue, bucket.due) > 0)) {
+        bucket.due = todoDue;
       }
 
       bucket.todos.push({
@@ -1995,6 +2132,17 @@ class GoalsDashboardPlugin extends Plugin {
     }
 
     const milestones = Array.from(grouped.values());
+    for (const milestone of milestones) {
+      const explicitRange = milestoneRanges[milestone.name] || {};
+      if (explicitRange.start) {
+        milestone.start = explicitRange.start;
+      }
+
+      if (explicitRange.due) {
+        milestone.due = explicitRange.due;
+      }
+    }
+
     milestones.sort((left, right) => {
       const dueCompare = compareDue(left.due, right.due);
       if (dueCompare !== 0) {
