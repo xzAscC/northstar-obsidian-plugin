@@ -8,6 +8,10 @@ const DEFAULT_SETTINGS = {
   homeCalendarDailyRoot: "Daily",
   homeCalendarDailyTemplatePath: "Daily/templates/daily-template.md",
   homeCalendarLookaheadDays: 7,
+  briefRoot: "Daily/review",
+  briefTemplateWeeklyPath: "",
+  briefTemplateMonthlyPath: "",
+  briefTemplateYearlyPath: "",
   homeListTemplate: "Plan top task\nReview calendar\nMove body",
   homeMetricDefinitions: [
     {
@@ -48,6 +52,7 @@ const DEFAULT_SETTINGS = {
   milestoneArchived: [],
   kanbanListOrder: ["Today"],
   kanbanArchivedLists: [],
+  kanbanTodoIncludeInactiveGoals: false,
 };
 
 const NORTHSTAR_FORGE_COMMANDS = [
@@ -55,6 +60,9 @@ const NORTHSTAR_FORGE_COMMANDS = [
   "Open Northstar Forge",
   "Open Milestone Kanban",
   "Open Kanban Todo",
+  "Open Current Weekly Brief",
+  "Open Current Monthly Brief",
+  "Open Current Yearly Brief",
 ];
 
 module.exports = {

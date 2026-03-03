@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const Module = require("module");
 const obsidian = require("obsidian");
-const { Plugin, requestUrl } = obsidian;
+const { Notice, Plugin, requestUrl } = obsidian;
 
 const NORTHSTAR_OBSIDIAN_PATCH_FLAG = "__northstarObsidianRequirePatched";
 if (!globalThis[NORTHSTAR_OBSIDIAN_PATCH_FLAG]) {
@@ -202,6 +202,111 @@ function listDateKeysInRange(startDateKey, endDateKey) {
   }
 
   return dateKeys;
+}
+
+function toStartOfDay(date) {
+  const normalized = new Date(date.getTime());
+  normalized.setHours(0, 0, 0, 0);
+  return normalized;
+}
+
+function addDays(date, days) {
+  return toStartOfDay(new Date(date.getTime() + days * 24 * 60 * 60 * 1000));
+}
+
+function formatMonthKey(date) {
+  const year = String(date.getFullYear()).padStart(4, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function getIsoWeekInfo(date) {
+  const base = toStartOfDay(date);
+  const weekday = (base.getDay() + 6) % 7;
+  const weekStart = addDays(base, -weekday);
+  const weekEnd = addDays(weekStart, 6);
+
+  const weekAnchor = addDays(weekStart, 3);
+  const weekYear = weekAnchor.getFullYear();
+  const firstWeekAnchor = new Date(weekYear, 0, 4, 0, 0, 0, 0);
+  const firstWeekday = (firstWeekAnchor.getDay() + 6) % 7;
+  const firstWeekStart = addDays(firstWeekAnchor, -firstWeekday);
+  const weekNumber = Math.floor((weekStart.getTime() - firstWeekStart.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
+
+  return {
+    weekYear,
+    weekNumber,
+    weekStart,
+    weekEnd,
+  };
+}
+
+function parseDateFromDailyBasename(basename) {
+  const matched = String(basename ?? "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!matched) {
+    return null;
+  }
+
+  const year = Number(matched[1]);
+  const month = Number(matched[2]);
+  const day = Number(matched[3]);
+  const parsed = new Date(year, month - 1, day, 0, 0, 0, 0);
+  if (!Number.isFinite(parsed.getTime())) {
+    return null;
+  }
+
+  if (parsed.getFullYear() !== year || parsed.getMonth() !== month - 1 || parsed.getDate() !== day) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function parseBriefMetricValue(rawValue, kind) {
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+
+  if (kind === "binary") {
+    return numeric > 0 ? 1 : 0;
+  }
+
+  return Number(numeric.toFixed(2));
+}
+
+function buildBriefFallbackTemplate(periodTitle) {
+  return [
+    `# ${periodTitle}`,
+    "",
+    "- 范围：{{startDate}} 至 {{endDate}}",
+    "- 生成时间：{{generatedAt}}",
+    "",
+    "## 概览",
+    "{{overviewSection}}",
+    "",
+    "## 完成事项",
+    "{{completedItemsSection}}",
+    "",
+    "## 未完成事项",
+    "{{pendingItemsSection}}",
+    "",
+    "## 指标趋势",
+    "{{metricsSection}}",
+    "",
+    "## 下阶段重点",
+    "- ",
+  ].join("\n");
+}
+
+function renderBriefTemplate(templateContent, values) {
+  return String(templateContent ?? "").replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_, key) => {
+    if (!Object.prototype.hasOwnProperty.call(values, key)) {
+      return "";
+    }
+
+    return String(values[key] ?? "");
+  });
 }
 
 function normalizeHomeCalendarTaskItem(rawItem) {
@@ -499,6 +604,30 @@ class GoalsDashboardPlugin extends Plugin {
       callback: () => this.activateKanbanTodoView(),
     });
 
+    this.addCommand({
+      id: "open-current-weekly-brief",
+      name: "Open Current Weekly Brief",
+      callback: async () => {
+        await this.openCurrentBrief("weekly");
+      },
+    });
+
+    this.addCommand({
+      id: "open-current-monthly-brief",
+      name: "Open Current Monthly Brief",
+      callback: async () => {
+        await this.openCurrentBrief("monthly");
+      },
+    });
+
+    this.addCommand({
+      id: "open-current-yearly-brief",
+      name: "Open Current Yearly Brief",
+      callback: async () => {
+        await this.openCurrentBrief("yearly");
+      },
+    });
+
     this.addSettingTab(new GoalsDashboardSettingTab(this.app, this));
 
     this.app.workspace.onLayoutReady(() => {
@@ -590,6 +719,10 @@ class GoalsDashboardPlugin extends Plugin {
     this.settings.homeCalendarDailyTemplatePath =
       String(this.settings.homeCalendarDailyTemplatePath ?? "").trim() ||
       DEFAULT_SETTINGS.homeCalendarDailyTemplatePath;
+    this.settings.briefRoot = normalizeFolderPath(this.settings.briefRoot, DEFAULT_SETTINGS.briefRoot);
+    this.settings.briefTemplateWeeklyPath = String(this.settings.briefTemplateWeeklyPath ?? "").trim();
+    this.settings.briefTemplateMonthlyPath = String(this.settings.briefTemplateMonthlyPath ?? "").trim();
+    this.settings.briefTemplateYearlyPath = String(this.settings.briefTemplateYearlyPath ?? "").trim();
     const lookaheadDays = Number(this.settings.homeCalendarLookaheadDays);
     this.settings.homeCalendarLookaheadDays = Number.isFinite(lookaheadDays)
       ? Math.max(1, Math.min(31, Math.round(lookaheadDays)))
@@ -634,6 +767,8 @@ class GoalsDashboardPlugin extends Plugin {
     this.settings.kanbanArchivedLists = archivedLists.filter((name) =>
       this.settings.kanbanListOrder.includes(name),
     );
+    this.settings.kanbanTodoIncludeInactiveGoals =
+      this.settings.kanbanTodoIncludeInactiveGoals === true;
 
     this.settings.goalsFolder = normalizeFolderPath(this.settings.goalsFolder, DEFAULT_SETTINGS.goalsFolder);
     this.settings.kanbanFolder = normalizeFolderPath(this.settings.kanbanFolder, DEFAULT_SETTINGS.kanbanFolder);
@@ -767,18 +902,6 @@ class GoalsDashboardPlugin extends Plugin {
       return Number(numeric.toFixed(2));
     };
 
-    const parseDateFromBasename = (basename) => {
-      const matched = String(basename ?? "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
-      if (!matched) {
-        return null;
-      }
-
-      const year = Number(matched[1]);
-      const month = Number(matched[2]);
-      const day = Number(matched[3]);
-      return new Date(year, month - 1, day, 0, 0, 0, 0);
-    };
-
     const endDate = new Date();
     endDate.setHours(0, 0, 0, 0);
     const startDate = new Date(endDate.getTime() - (lookbackDays - 1) * 24 * 60 * 60 * 1000);
@@ -793,7 +916,7 @@ class GoalsDashboardPlugin extends Plugin {
         continue;
       }
 
-      const noteDate = parseDateFromBasename(file.basename);
+      const noteDate = parseDateFromDailyBasename(file.basename);
       if (!noteDate || noteDate < startDate || noteDate > endDate) {
         continue;
       }
@@ -1119,6 +1242,279 @@ class GoalsDashboardPlugin extends Plugin {
     return this.app.vault.cachedRead(templateFile);
   }
 
+  getBriefPeriodInfo(periodType, anchorDate = new Date()) {
+    const date = toStartOfDay(anchorDate);
+    if (periodType === "weekly") {
+      const isoWeek = getIsoWeekInfo(date);
+      const weekLabel = `W${String(isoWeek.weekNumber).padStart(2, "0")}`;
+      return {
+        type: "weekly",
+        title: `周报 ${isoWeek.weekYear}-${weekLabel}`,
+        key: `${isoWeek.weekYear}-${weekLabel}`,
+        folder: "weekly",
+        fileName: `${isoWeek.weekYear}-[W]${String(isoWeek.weekNumber).padStart(2, "0")}.md`,
+        startDate: isoWeek.weekStart,
+        endDate: isoWeek.weekEnd,
+      };
+    }
+
+    if (periodType === "monthly") {
+      const startDate = new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
+      const endDate = new Date(date.getFullYear(), date.getMonth() + 1, 0, 0, 0, 0, 0);
+      const key = formatMonthKey(date);
+      return {
+        type: "monthly",
+        title: `月报 ${key}`,
+        key,
+        folder: "monthly",
+        fileName: `${key}.md`,
+        startDate,
+        endDate,
+      };
+    }
+
+    if (periodType === "yearly") {
+      const year = date.getFullYear();
+      return {
+        type: "yearly",
+        title: `年报 ${year}`,
+        key: String(year),
+        folder: "yearly",
+        fileName: `${year}.md`,
+        startDate: new Date(year, 0, 1, 0, 0, 0, 0),
+        endDate: new Date(year, 11, 31, 0, 0, 0, 0),
+      };
+    }
+
+    throw new Error("invalid-brief-period");
+  }
+
+  getBriefTemplatePath(periodType) {
+    if (periodType === "weekly") {
+      return String(this.settings.briefTemplateWeeklyPath ?? "").trim();
+    }
+
+    if (periodType === "monthly") {
+      return String(this.settings.briefTemplateMonthlyPath ?? "").trim();
+    }
+
+    if (periodType === "yearly") {
+      return String(this.settings.briefTemplateYearlyPath ?? "").trim();
+    }
+
+    return "";
+  }
+
+  async readBriefTemplate(periodType, periodTitle) {
+    const templatePath = this.getBriefTemplatePath(periodType);
+    if (!templatePath) {
+      return buildBriefFallbackTemplate(periodTitle);
+    }
+
+    const templateFile = this.app.vault.getAbstractFileByPath(templatePath);
+    if (!templateFile || Array.isArray(templateFile.children) || templateFile.extension !== "md") {
+      return buildBriefFallbackTemplate(periodTitle);
+    }
+
+    return this.app.vault.cachedRead(templateFile);
+  }
+
+  async collectBriefData(startDate, endDate) {
+    const metrics = this.getHomeMetricDefinitions();
+    const metricSamples = new Map(metrics.map((metric) => [metric.id, []]));
+    const completedCounts = new Map();
+    const pendingCounts = new Map();
+
+    let noteDays = 0;
+    let taskTotal = 0;
+    let taskDone = 0;
+
+    const cursor = toStartOfDay(startDate);
+    const end = toStartOfDay(endDate);
+    while (cursor.getTime() <= end.getTime()) {
+      const dailyPath = this.getDailyNotePathByDate(cursor);
+      const file = this.app.vault.getAbstractFileByPath(dailyPath);
+      if (file && !Array.isArray(file.children) && file.extension === "md") {
+        noteDays += 1;
+        const dateKey = formatDateKey(cursor);
+
+        const markdown = await this.app.vault.cachedRead(file);
+        const parsedTasks = parseDailyTaskSection(markdown);
+        if (parsedTasks.hasSection && parsedTasks.tasks.length > 0) {
+          for (const task of parsedTasks.tasks) {
+            taskTotal += 1;
+            const targetMap = task.done ? completedCounts : pendingCounts;
+            if (task.done) {
+              taskDone += 1;
+            }
+
+            targetMap.set(task.text, Number(targetMap.get(task.text) || 0) + 1);
+          }
+        }
+
+        const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+        if (frontmatter) {
+          for (const metric of metrics) {
+            const matchedAlias = metric.aliases.find((alias) =>
+              Object.prototype.hasOwnProperty.call(frontmatter, alias),
+            );
+            if (!matchedAlias) {
+              continue;
+            }
+
+            const metricValue = parseBriefMetricValue(frontmatter[matchedAlias], metric.kind);
+            if (metricValue === null) {
+              continue;
+            }
+
+            metricSamples.get(metric.id).push({
+              date: dateKey,
+              value: metricValue,
+            });
+          }
+        }
+      }
+
+      cursor.setDate(cursor.getDate() + 1);
+      cursor.setHours(0, 0, 0, 0);
+    }
+
+    const toRankedTaskLines = (map) => {
+      const ranked = Array.from(map.entries())
+        .sort((left, right) => {
+          if (right[1] !== left[1]) {
+            return right[1] - left[1];
+          }
+
+          return left[0].localeCompare(right[0]);
+        })
+        .slice(0, 15);
+
+      if (ranked.length === 0) {
+        return "- 无";
+      }
+
+      return ranked.map(([text, count]) => (count > 1 ? `- ${text} (${count})` : `- ${text}`)).join("\n");
+    };
+
+    const formatMetric = (value) => {
+      if (!Number.isFinite(value)) {
+        return "-";
+      }
+
+      return Number.isInteger(value) ? String(value) : String(Number(value).toFixed(2));
+    };
+
+    const metricLines = [];
+    for (const metric of metrics) {
+      const samples = metricSamples.get(metric.id)
+        .slice()
+        .sort((left, right) => String(left.date).localeCompare(String(right.date)));
+      if (samples.length === 0) {
+        metricLines.push(`- ${metric.label}: 无数据`);
+        continue;
+      }
+
+      const values = samples.map((sample) => sample.value);
+      const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+      const latest = values[values.length - 1];
+      const max = Math.max(...values);
+      const min = Math.min(...values);
+      metricLines.push(
+        `- ${metric.label}: avg ${formatMetric(average)} | latest ${formatMetric(latest)} | min ${formatMetric(min)} | max ${formatMetric(max)} | samples ${samples.length}`,
+      );
+    }
+
+    return {
+      totalDays: Math.floor((toStartOfDay(endDate).getTime() - toStartOfDay(startDate).getTime()) / (24 * 60 * 60 * 1000)) + 1,
+      noteDays,
+      taskTotal,
+      taskDone,
+      taskPending: Math.max(0, taskTotal - taskDone),
+      completionRate: taskTotal > 0 ? Number(((taskDone / taskTotal) * 100).toFixed(1)) : 0,
+      completedItemsSection: toRankedTaskLines(completedCounts),
+      pendingItemsSection: toRankedTaskLines(pendingCounts),
+      metricsSection: metricLines.length > 0 ? metricLines.join("\n") : "- 无指标",
+    };
+  }
+
+  async generateBrief(periodType, anchorDate = new Date()) {
+    const period = this.getBriefPeriodInfo(periodType, anchorDate);
+    const data = await this.collectBriefData(period.startDate, period.endDate);
+    const template = await this.readBriefTemplate(period.type, period.title);
+    const overviewSection = [
+      `- 覆盖日报：${data.noteDays}/${data.totalDays} 天`,
+      `- 任务完成率：${data.taskDone}/${data.taskTotal} (${data.completionRate}%)`,
+      `- 未完成任务：${data.taskPending}`,
+    ].join("\n");
+
+    const rendered = renderBriefTemplate(template, {
+      periodTitle: period.title,
+      periodKey: period.key,
+      startDate: formatDateKey(period.startDate),
+      endDate: formatDateKey(period.endDate),
+      generatedAt: new Date().toLocaleString(),
+      overviewSection,
+      completedItemsSection: data.completedItemsSection,
+      pendingItemsSection: data.pendingItemsSection,
+      metricsSection: data.metricsSection,
+    });
+
+    const briefRoot = normalizeFolderPath(this.settings.briefRoot, DEFAULT_SETTINGS.briefRoot);
+    const briefFolder = `${briefRoot}/${period.folder}`;
+    const briefPath = `${briefFolder}/${period.fileName}`;
+    await ensureFolderExists(this.app.vault, briefFolder);
+
+    const existing = this.app.vault.getAbstractFileByPath(briefPath);
+    if (existing && Array.isArray(existing.children)) {
+      throw new Error("brief-path-conflict");
+    }
+
+    if (!existing) {
+      const file = await this.app.vault.create(briefPath, rendered);
+      return {
+        file,
+        path: briefPath,
+        created: true,
+      };
+    }
+
+    const previous = await this.app.vault.cachedRead(existing);
+    if (previous !== rendered) {
+      await this.app.vault.modify(existing, rendered);
+    }
+
+    return {
+      file: existing,
+      path: briefPath,
+      created: false,
+    };
+  }
+
+  async openCurrentBrief(periodType) {
+    try {
+      const result = await this.generateBrief(periodType, new Date());
+      const leaf = this.app.workspace.getLeaf(true);
+      await leaf.openFile(result.file, { active: true });
+      this.app.workspace.revealLeaf(leaf);
+      new Notice(result.created ? "Brief created." : "Brief updated.");
+    } catch (error) {
+      const code = String(error?.message ?? "");
+      if (code === "invalid-brief-period") {
+        new Notice("Invalid brief period.");
+        return;
+      }
+
+      if (code === "brief-path-conflict") {
+        new Notice("Brief path exists but is not a markdown note.");
+        return;
+      }
+
+      console.error(error);
+      new Notice("Failed to generate brief.");
+    }
+  }
+
   async openOrCreateDailyNoteByDateKey(dateKey, options = {}) {
     const date = parseDateKey(dateKey);
     if (!date) {
@@ -1147,6 +1543,9 @@ class GoalsDashboardPlugin extends Plugin {
       ? this.app.workspace.getLeaf("split", "vertical") || this.app.workspace.getLeaf(true)
       : this.app.workspace.getLeaf(true);
     await leaf.openFile(targetFile, { active: true });
+    if (options.preferPreview && leaf?.view && typeof leaf.view.setMode === "function") {
+      await leaf.view.setMode("preview");
+    }
     this.app.workspace.revealLeaf(leaf);
 
     return {
