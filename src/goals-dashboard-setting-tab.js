@@ -42,9 +42,12 @@ class GoalsDashboardSettingTab extends PluginSettingTab {
     const folderSuggestions = getVaultFolderSuggestions(this.app.vault, [
       DEFAULT_SETTINGS.goalsFolder,
       DEFAULT_SETTINGS.kanbanFolder,
+      DEFAULT_SETTINGS.briefRoot,
       this.plugin.settings.goalsFolder,
       this.plugin.settings.kanbanFolder,
+      this.plugin.settings.briefRoot,
     ]);
+    const markdownSuggestions = this.app.vault.getMarkdownFiles().map((file) => file.path);
 
     containerEl.createEl("h2", { text: "Northstar Forge settings" });
 
@@ -100,9 +103,7 @@ class GoalsDashboardSettingTab extends PluginSettingTab {
           containerEl,
           text.inputEl,
           createDatalistId("Daily template path"),
-          this.app.vault
-            .getMarkdownFiles()
-            .map((file) => file.path),
+          markdownSuggestions,
         );
 
         return text;
@@ -125,6 +126,94 @@ class GoalsDashboardSettingTab extends PluginSettingTab {
             this.display();
           }),
       );
+
+    new Setting(containerEl)
+      .setName("Brief root folder")
+      .setDesc("Folder for generated weekly/monthly/yearly briefs.")
+      .addText((text) => {
+        text
+          .setPlaceholder("Daily/review")
+          .setValue(this.plugin.settings.briefRoot)
+          .onChange(async (value) => {
+            this.plugin.settings.briefRoot = normalizeFolderPath(value, DEFAULT_SETTINGS.briefRoot);
+            await this.plugin.saveSettings();
+          });
+
+        attachSuggestions(
+          containerEl,
+          text.inputEl,
+          createDatalistId("Brief root folder"),
+          folderSuggestions,
+        );
+
+        return text;
+      });
+
+    new Setting(containerEl)
+      .setName("Weekly brief template path")
+      .setDesc("Optional markdown template for weekly brief generation.")
+      .addText((text) => {
+        text
+          .setPlaceholder("Templates/weekly-brief.md")
+          .setValue(this.plugin.settings.briefTemplateWeeklyPath)
+          .onChange(async (value) => {
+            this.plugin.settings.briefTemplateWeeklyPath = String(value ?? "").trim();
+            await this.plugin.saveSettings();
+          });
+
+        attachSuggestions(
+          containerEl,
+          text.inputEl,
+          createDatalistId("Weekly brief template path"),
+          markdownSuggestions,
+        );
+
+        return text;
+      });
+
+    new Setting(containerEl)
+      .setName("Monthly brief template path")
+      .setDesc("Optional markdown template for monthly brief generation.")
+      .addText((text) => {
+        text
+          .setPlaceholder("Templates/monthly-brief.md")
+          .setValue(this.plugin.settings.briefTemplateMonthlyPath)
+          .onChange(async (value) => {
+            this.plugin.settings.briefTemplateMonthlyPath = String(value ?? "").trim();
+            await this.plugin.saveSettings();
+          });
+
+        attachSuggestions(
+          containerEl,
+          text.inputEl,
+          createDatalistId("Monthly brief template path"),
+          markdownSuggestions,
+        );
+
+        return text;
+      });
+
+    new Setting(containerEl)
+      .setName("Yearly brief template path")
+      .setDesc("Optional markdown template for yearly brief generation.")
+      .addText((text) => {
+        text
+          .setPlaceholder("Templates/yearly-brief.md")
+          .setValue(this.plugin.settings.briefTemplateYearlyPath)
+          .onChange(async (value) => {
+            this.plugin.settings.briefTemplateYearlyPath = String(value ?? "").trim();
+            await this.plugin.saveSettings();
+          });
+
+        attachSuggestions(
+          containerEl,
+          text.inputEl,
+          createDatalistId("Yearly brief template path"),
+          markdownSuggestions,
+        );
+
+        return text;
+      });
 
     new Setting(containerEl)
       .setName("Daily list template")
@@ -209,6 +298,18 @@ class GoalsDashboardSettingTab extends PluginSettingTab {
 
         return text;
       });
+
+    new Setting(containerEl)
+      .setName("Include inactive goals in Kanban")
+      .setDesc(
+        "When disabled, Kanban Todo goal suggestions only include active goals (not completed/archived).",
+      )
+      .addToggle((toggle) =>
+        toggle.setValue(Boolean(this.plugin.settings.kanbanTodoIncludeInactiveGoals)).onChange(async (value) => {
+          this.plugin.settings.kanbanTodoIncludeInactiveGoals = value;
+          await this.plugin.saveSettings();
+        }),
+      );
 
     const commandsEl = containerEl.createDiv({ cls: "planning-hub-command-list" });
     commandsEl.createEl("h3", { text: "Commands" });

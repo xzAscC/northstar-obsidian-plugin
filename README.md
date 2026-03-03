@@ -15,6 +15,7 @@ tags:
 - `Northstar Homepage`：启动 Obsidian 自动打开主页，包含 Local Calendar（点击日期打开对应日报；若缺失会按模板创建）和 Daily List（本地时间每天 05:00 自动重置）。
 - `Milestone Kanban`：集中查看某个里程碑下包含的 goal 与 markdown todo。
 - `Kanban Todo`：读取 `Kanban/` 目录中的 todo 文件（每个 todo 一个 `.md` 文件），直接在 Northstar Forge 里查看未完成待办。
+- `Brief Generator`：按日报自动聚合并生成周报/月报/年报到 `Daily/review/weekly|monthly|yearly`。
 
 > 注意：`milestone`、`list`、`priority` 等字段必须写在 Markdown 文件开头的 frontmatter（Obsidian Properties）里，不能只写在正文。
 
@@ -95,8 +96,23 @@ milestoneTarget: 12
 21. 视图默认只展示未完成项；已完成项不会在列表中显示。
 22. 可在面板里直接点击 checkbox 切换 `- [ ]` / `- [x]`，并写回原文件。
 23. 视图中不展示 `Todo:` / `Done:` 前缀，直接显示 checkbox 形态内容。
+24. 命令面板支持 `Open Current Weekly Brief`、`Open Current Monthly Brief`、`Open Current Yearly Brief`，会自动生成并打开当前周期简报。
+25. 周报使用 ISO 自然周（周一到周日），命名为 `Daily/review/weekly/YYYY-[W]WW.md`（`YYYY` 为 ISO week-year）。
 
-## 4) 常见问题
+## 4) Brief 模板占位符
+
+可在设置中为周/月/年简报配置独立模板路径。模板可用占位符：
+
+- `{{periodTitle}}`：例如 `周报 2026-W10`
+- `{{periodKey}}`：例如 `2026-W10`、`2026-03`、`2026`
+- `{{startDate}}` / `{{endDate}}`：统计区间
+- `{{generatedAt}}`：生成时间
+- `{{overviewSection}}`：覆盖日报、任务完成率等概览
+- `{{completedItemsSection}}`：本期完成事项（聚合）
+- `{{pendingItemsSection}}`：本期未完成事项（聚合）
+- `{{metricsSection}}`：Daily metrics 趋势（avg/latest/min/max）
+
+## 5) 常见问题
 
 - 看不到卡片：检查 frontmatter 是否有 `type: goal`，且数值字段是数字。
 - 某个 board 不显示：检查是否配置了 `boardArchived: true`，或 board 名称是 `Archived`。

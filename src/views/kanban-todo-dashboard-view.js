@@ -6,8 +6,10 @@ const {
   createDatalistId,
   formatHoursValue,
   groupBy,
+  isGoalArchived,
   normalizeKanbanListOrder,
   normalizePriority,
+  normalizeStatus,
 } = require("../utils");
 const { CreateKanbanListModal, CreateKanbanTodoModal } = require("../modals");
 
@@ -548,9 +550,28 @@ class KanbanTodoDashboardView extends ItemView {
         ),
       ).sort((left, right) => left.localeCompare(right));
 
+    const includeInactiveGoals = Boolean(this.plugin.settings.kanbanTodoIncludeInactiveGoals);
+    const isCompletedGoal = (goal) => {
+      const status = normalizeStatus(goal?.status);
+      const isClosedStatus = ["completed", "complete", "done", "closed"].includes(status);
+      const progressDone = Number(goal?.percent) >= 100;
+      return isClosedStatus || progressDone;
+    };
+
+    const activeGoalTitles = new Set(
+      (Array.isArray(goals) ? goals : [])
+        .filter((goal) => includeInactiveGoals || (!isGoalArchived(goal) && !isCompletedGoal(goal)))
+        .map((goal) => String(goal?.title ?? "").trim())
+        .filter(Boolean),
+    );
+
+    const todoGoalTitles = (Array.isArray(todos) ? todos : [])
+      .map((todo) => String(todo?.goal ?? "").trim())
+      .filter((title) => title && (includeInactiveGoals || activeGoalTitles.has(title)));
+
     const goalOptions = uniqueSorted([
-      ...(Array.isArray(goals) ? goals.map((goal) => goal.title) : []),
-      ...(Array.isArray(todos) ? todos.map((todo) => todo.goal) : []),
+      ...activeGoalTitles,
+      ...todoGoalTitles,
     ]);
 
     const milestoneOptions = uniqueSorted([

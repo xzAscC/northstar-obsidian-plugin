@@ -366,6 +366,9 @@ class HomeDashboardView extends ItemView {
       });
     }
 
+    const briefCard = grid.createDiv({ cls: "northstar-homepage-card northstar-homepage-brief-card" });
+    this.renderBriefCard(briefCard);
+
     const calendarTasksCard = container.createDiv({
       cls: "northstar-homepage-card northstar-homepage-calendar-tasks-card",
     });
@@ -420,6 +423,54 @@ class HomeDashboardView extends ItemView {
     const recentWeight = Math.max(0.92, Math.min(1.62, 0.92 + Math.min(recentCount, 14) * 0.05));
     container.style.setProperty("--northstar-bookmark-col", `${bookmarkWeight.toFixed(2)}fr`);
     container.style.setProperty("--northstar-recent-col", `${recentWeight.toFixed(2)}fr`);
+  }
+
+  renderBriefCard(card) {
+    const top = card.createDiv({ cls: "northstar-homepage-card-top" });
+    top.createEl("h3", { text: "Brief" });
+    top.createEl("span", {
+      cls: "northstar-homepage-card-hint",
+      text: "本周 / 本月 / 本年",
+    });
+
+    card.createEl("p", {
+      cls: "northstar-homepage-brief-hint",
+      text: "快捷打开已有 Brief，或一键生成并打开最新版本。",
+    });
+
+    const periodItems = [
+      { type: "weekly", label: "本周" },
+      { type: "monthly", label: "本月" },
+      { type: "yearly", label: "本年" },
+    ];
+
+    const list = card.createDiv({ cls: "northstar-homepage-brief-list" });
+    periodItems.forEach((periodItem) => {
+      const row = list.createDiv({ cls: "northstar-homepage-brief-row" });
+      row.createEl("strong", {
+        cls: "northstar-homepage-brief-label",
+        text: periodItem.label,
+      });
+
+      const actions = row.createDiv({ cls: "northstar-homepage-brief-actions" });
+      const openButton = actions.createEl("button", {
+        cls: "goals-dashboard-refresh",
+        text: "打开",
+      });
+      openButton.type = "button";
+      openButton.addEventListener("click", async () => {
+        await this.tryOpenCurrentBrief(periodItem.type);
+      });
+
+      const generateButton = actions.createEl("button", {
+        cls: "goals-dashboard-refresh",
+        text: "生成",
+      });
+      generateButton.type = "button";
+      generateButton.addEventListener("click", async () => {
+        await this.tryGenerateCurrentBrief(periodItem.type);
+      });
+    });
   }
 
   renderQuickFileList(card, items, options = {}) {
@@ -557,6 +608,43 @@ class HomeDashboardView extends ItemView {
     const leaf = this.app.workspace.getLeaf("split");
     await leaf.openFile(file, { active: true });
     this.app.workspace.revealLeaf(leaf);
+  }
+
+  async tryOpenCurrentBrief(periodType) {
+    try {
+      const period = this.plugin.getBriefPeriodInfo(periodType, new Date());
+      const briefRoot = String(this.plugin.settings?.briefRoot ?? "").replace(/^\/+|\/+$/g, "").trim();
+      const briefPath = briefRoot
+        ? `${briefRoot}/${period.folder}/${period.fileName}`
+        : `${period.folder}/${period.fileName}`;
+      const target = this.app.vault.getAbstractFileByPath(briefPath);
+      if (!target || Array.isArray(target.children) || target.extension !== "md") {
+        new Notice("当前周期 Brief 尚未生成，请点击“生成”。");
+        return;
+      }
+
+      const leaf = this.app.workspace.getLeaf("split");
+      await leaf.openFile(target, { active: true });
+      this.app.workspace.revealLeaf(leaf);
+    } catch (error) {
+      const code = String(error?.message ?? "");
+      if (code === "invalid-brief-period") {
+        new Notice("Brief 周期类型无效。", 3200);
+        return;
+      }
+
+      console.error(error);
+      new Notice("打开 Brief 失败。", 3200);
+    }
+  }
+
+  async tryGenerateCurrentBrief(periodType) {
+    try {
+      await this.plugin.openCurrentBrief(periodType);
+    } catch (error) {
+      console.error(error);
+      new Notice("生成 Brief 失败。", 3200);
+    }
   }
 
   initializeCalendarState() {

@@ -1363,6 +1363,41 @@
   min-height: 280px;
 }
 
+.northstar-homepage-brief-card {
+  min-height: 220px;
+}
+
+.northstar-homepage-brief-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin: 0;
+}
+
+.northstar-homepage-brief-list {
+  display: grid;
+  gap: 8px;
+}
+
+.northstar-homepage-brief-row {
+  align-items: center;
+  background: color-mix(in srgb, var(--background-primary) 90%, #ffffff 10%);
+  border: 1px solid color-mix(in srgb, var(--home-card-border) 74%, transparent);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 8px 10px;
+}
+
+.northstar-homepage-brief-label {
+  font-size: 14px;
+}
+
+.northstar-homepage-brief-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
 .northstar-homepage-calendar-tasks-card {
   margin-top: 12px;
   min-height: 180px;
@@ -1858,6 +1893,14 @@
 
   .northstar-homepage-link-item {
     grid-template-columns: 20px minmax(0, 1fr) auto;
+  }
+
+  .northstar-homepage-brief-row {
+    grid-template-columns: 1fr;
+  }
+
+  .northstar-homepage-brief-actions {
+    justify-content: flex-start;
   }
 
   .northstar-clock-local-time {
