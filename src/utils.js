@@ -213,6 +213,7 @@ function needsKanbanFrontmatterHydration(frontmatter) {
     "priority",
     "due",
     "tags",
+    "order",
     "planHours",
     "hoursLeft",
   ];
@@ -224,6 +225,8 @@ function parseKanbanTodoMetadata(frontmatter) {
   const fm = frontmatter || {};
   const planHours = parseHoursValue(fm.planHours ?? fm.plannedHours);
   const hoursLeft = parseHoursValue(fm.hoursLeft);
+  const orderRaw = Number(fm.order);
+  const order = Number.isFinite(orderRaw) && orderRaw >= 0 ? Math.floor(orderRaw) : null;
 
   return {
     list: normalizeKanbanListName(fm.list),
@@ -234,6 +237,7 @@ function parseKanbanTodoMetadata(frontmatter) {
     tags: normalizeTagList(fm.tags),
     planHours,
     hoursLeft,
+    order,
   };
 }
 
@@ -386,6 +390,7 @@ function buildGoalTemplate(values) {
     "status: on-track",
     'owner: ""',
     'milestone: "Main Milestone"',
+    'milestoneStart: ""',
     'milestoneDue: ""',
     "milestonePercent: 0",
     "boardArchived: false",
@@ -407,6 +412,8 @@ function buildKanbanTodoTemplate(payload) {
   const tags = normalizeTagList(payload.tags);
   const planHours = parseHoursValue(payload.planHours);
   const hoursLeft = parseHoursValue(payload.hoursLeft);
+  const orderRaw = Number(payload.order);
+  const order = Number.isFinite(orderRaw) && orderRaw >= 0 ? Math.floor(orderRaw) : 0;
 
   return [
     "---",
@@ -416,6 +423,7 @@ function buildKanbanTodoTemplate(payload) {
     `priority: ${toYamlString(priority)}`,
     `due: ${toYamlString(due)}`,
     `tags: ${toYamlArray(tags)}`,
+    `order: ${order}`,
     `planHours: ${Number.isFinite(planHours) ? planHours : 0}`,
     `hoursLeft: ${Number.isFinite(hoursLeft) ? hoursLeft : Number.isFinite(planHours) ? planHours : 0}`,
     "---",
