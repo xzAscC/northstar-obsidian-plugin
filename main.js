@@ -1543,6 +1543,9 @@ class GoalsDashboardPlugin extends Plugin {
       ? this.app.workspace.getLeaf("split", "vertical") || this.app.workspace.getLeaf(true)
       : this.app.workspace.getLeaf(true);
     await leaf.openFile(targetFile, { active: true });
+    if (options.preferPreview && leaf?.view && typeof leaf.view.setMode === "function") {
+      await leaf.view.setMode("preview");
+    }
     this.app.workspace.revealLeaf(leaf);
 
     return {

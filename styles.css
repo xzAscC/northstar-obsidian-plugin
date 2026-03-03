@@ -1216,6 +1216,13 @@
   padding: 0;
 }
 
+.northstar-calendar-preview-btn {
+  border-radius: 999px;
+  font-size: 12px;
+  min-height: 30px;
+  padding: 0 10px;
+}
+
 .northstar-calendar-title {
   font-size: 15px;
   font-weight: 700;
@@ -1364,13 +1371,72 @@
 }
 
 .northstar-homepage-brief-card {
-  min-height: 220px;
+  min-height: 0;
+}
+
+.northstar-homepage-brief-controls {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .northstar-homepage-brief-hint {
   color: var(--text-muted);
   font-size: 12px;
   margin: 0;
+}
+
+.northstar-homepage-brief-switch {
+  background: color-mix(in srgb, var(--background-primary) 88%, #ffffff 12%);
+  border: 1px solid color-mix(in srgb, var(--home-card-border) 72%, transparent);
+  border-radius: 12px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 8px;
+}
+
+.northstar-homepage-brief-tab {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--home-card-border) 72%, transparent);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  min-height: 34px;
+  text-align: center;
+}
+
+.northstar-homepage-brief-tab.is-active {
+  background: color-mix(in srgb, var(--text-accent) 16%, #d7ebe2 84%);
+  border-color: color-mix(in srgb, var(--text-accent) 54%, #7cae9d 46%);
+}
+
+.northstar-homepage-brief-preview-meta {
+  background: color-mix(in srgb, var(--background-primary) 92%, #f4f8f5 8%);
+  border: 1px solid color-mix(in srgb, var(--home-card-border) 72%, transparent);
+  border-radius: 10px;
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+}
+
+.northstar-homepage-brief-preview {
+  background: color-mix(in srgb, var(--background-primary) 92%, #f7faf8 8%);
+  border: 1px solid color-mix(in srgb, var(--home-card-border) 72%, transparent);
+  border-radius: 10px;
+  max-height: 500px;
+  min-height: 220px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.northstar-homepage-brief-preview > :first-child {
+  margin-top: 0;
+}
+
+.northstar-homepage-brief-preview > :last-child {
+  margin-bottom: 0;
 }
 
 .northstar-homepage-brief-list {
@@ -1411,6 +1477,11 @@
     minmax(260px, var(--northstar-bookmark-col, 0.95fr))
     minmax(300px, var(--northstar-recent-col, 1.15fr));
   margin-top: 12px;
+}
+
+.northstar-homepage-brief-preview-card {
+  margin-top: 12px;
+  min-height: 0;
 }
 
 .northstar-homepage-link-list {
@@ -1901,6 +1972,14 @@
 
   .northstar-homepage-brief-actions {
     justify-content: flex-start;
+  }
+
+  .northstar-homepage-brief-switch {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .northstar-homepage-brief-preview {
+    max-height: 340px;
   }
 
   .northstar-clock-local-time {

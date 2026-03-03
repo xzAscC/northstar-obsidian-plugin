@@ -1,4 +1,4 @@
-const { ItemView, Notice } = require("obsidian");
+const { ItemView, MarkdownRenderer, Notice } = require("obsidian");
 
 const { VIEW_TYPE_HOME_DASHBOARD } = require("../constants");
 
@@ -9,6 +9,7 @@ class HomeDashboardView extends ItemView {
     this.refreshTimer = null;
     this.minuteTimer = null;
     this.secondTimer = null;
+    this.briefState = null;
   }
 
   getViewType() {
@@ -124,6 +125,7 @@ class HomeDashboardView extends ItemView {
 
     const grid = container.createDiv({ cls: "northstar-homepage-grid" });
     this.calendarTaskSummary = this.plugin.getHomeCalendarTaskSummaryByDate();
+    this.initializeBriefState();
 
     const calendarCard = grid.createDiv({ cls: "northstar-homepage-card" });
     this.initializeCalendarState();
@@ -366,9 +368,6 @@ class HomeDashboardView extends ItemView {
       });
     }
 
-    const briefCard = grid.createDiv({ cls: "northstar-homepage-card northstar-homepage-brief-card" });
-    this.renderBriefCard(briefCard);
-
     const calendarTasksCard = container.createDiv({
       cls: "northstar-homepage-card northstar-homepage-calendar-tasks-card",
     });
@@ -384,6 +383,11 @@ class HomeDashboardView extends ItemView {
     this.renderBookmarkCard(bookmarkCard, bookmarkItems);
     this.renderRecentFilesCard(recentCard, recentItems);
     this.applyQuickListLayout(linksRow, bookmarkItems.length, recentItems.length);
+
+    const briefPreviewCard = container.createDiv({
+      cls: "northstar-homepage-card northstar-homepage-brief-preview-card",
+    });
+    await this.renderBriefPreviewCard(briefPreviewCard);
   }
 
   renderBookmarkCard(card, bookmarkItems = this.getBookmarkedFiles()) {
@@ -425,52 +429,114 @@ class HomeDashboardView extends ItemView {
     container.style.setProperty("--northstar-recent-col", `${recentWeight.toFixed(2)}fr`);
   }
 
-  renderBriefCard(card) {
+  async renderBriefPreviewCard(card) {
+    const periodItems = [
+      { type: "yearly", label: "本年", tabLabel: "年" },
+      { type: "monthly", label: "本月", tabLabel: "月" },
+      { type: "weekly", label: "本周", tabLabel: "周" },
+      { type: "daily", label: "今日", tabLabel: "日" },
+    ];
+
+    const selectedType = periodItems.some((item) => item.type === this.briefState?.selectedType)
+      ? this.briefState.selectedType
+      : "yearly";
+    const selectedPeriod = periodItems.find((item) => item.type === selectedType) || periodItems[0];
+    const previewPayload = await this.getBriefPreviewPayload(selectedPeriod.type);
+
     const top = card.createDiv({ cls: "northstar-homepage-card-top" });
     top.createEl("h3", { text: "Brief" });
     top.createEl("span", {
       cls: "northstar-homepage-card-hint",
-      text: "本周 / 本月 / 本年",
+      text: "年月周日切换预览",
     });
 
-    card.createEl("p", {
-      cls: "northstar-homepage-brief-hint",
-      text: "快捷打开已有 Brief，或一键生成并打开最新版本。",
-    });
+    const controlsPanel = card.createDiv({ cls: "northstar-homepage-brief-controls" });
 
-    const periodItems = [
-      { type: "weekly", label: "本周" },
-      { type: "monthly", label: "本月" },
-      { type: "yearly", label: "本年" },
-    ];
-
-    const list = card.createDiv({ cls: "northstar-homepage-brief-list" });
+    const switchRow = controlsPanel.createDiv({ cls: "northstar-homepage-brief-switch" });
     periodItems.forEach((periodItem) => {
-      const row = list.createDiv({ cls: "northstar-homepage-brief-row" });
-      row.createEl("strong", {
-        cls: "northstar-homepage-brief-label",
-        text: periodItem.label,
+      const tabButton = switchRow.createEl("button", {
+        cls: `northstar-homepage-brief-tab${periodItem.type === selectedType ? " is-active" : ""}`,
+        text: periodItem.tabLabel,
       });
+      tabButton.type = "button";
+      tabButton.addEventListener("click", () => {
+        if (this.briefState.selectedType === periodItem.type) {
+          return;
+        }
 
-      const actions = row.createDiv({ cls: "northstar-homepage-brief-actions" });
-      const openButton = actions.createEl("button", {
-        cls: "goals-dashboard-refresh",
-        text: "打开",
-      });
-      openButton.type = "button";
-      openButton.addEventListener("click", async () => {
-        await this.tryOpenCurrentBrief(periodItem.type);
-      });
-
-      const generateButton = actions.createEl("button", {
-        cls: "goals-dashboard-refresh",
-        text: "生成",
-      });
-      generateButton.type = "button";
-      generateButton.addEventListener("click", async () => {
-        await this.tryGenerateCurrentBrief(periodItem.type);
+        this.briefState.selectedType = periodItem.type;
+        this.queueRefresh();
       });
     });
+
+    const actionRow = controlsPanel.createDiv({ cls: "northstar-homepage-brief-actions" });
+    const openButton = actionRow.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: selectedType === "daily" ? "打开今日日报" : `打开${selectedPeriod.label}`,
+    });
+    openButton.type = "button";
+    openButton.addEventListener("click", async () => {
+      if (selectedType === "daily") {
+        await this.tryOpenCalendarDay(this.toDateKey(new Date()), { preferPreview: true });
+        return;
+      }
+      await this.tryOpenCurrentBrief(selectedType, { preferPreview: true });
+    });
+
+    const generateButton = actionRow.createEl("button", {
+      cls: "goals-dashboard-refresh",
+      text: selectedType === "daily" ? "创建今日日报" : `生成${selectedPeriod.label}`,
+    });
+    generateButton.type = "button";
+    generateButton.addEventListener("click", async () => {
+      if (selectedType === "daily") {
+        await this.tryOpenCalendarDay(this.toDateKey(new Date()), { preferPreview: true });
+        return;
+      }
+
+      await this.tryGenerateCurrentBrief(selectedType, {
+        preferPreview: true,
+        refreshBrief: true,
+      });
+    });
+
+    controlsPanel.createEl("p", {
+      cls: "northstar-homepage-brief-hint",
+      text: previewPayload.file ? "Markdown 预览" : "当前周期文件尚未生成",
+    });
+
+    const previewMeta = card.createDiv({ cls: "northstar-homepage-brief-preview-meta" });
+    previewMeta.createEl("strong", {
+      cls: "northstar-homepage-brief-label",
+      text: selectedType === "daily" ? "今日日报" : `${selectedPeriod.label} Brief`,
+    });
+    previewMeta.createSpan({
+      cls: "northstar-homepage-card-hint",
+      text: previewPayload.path,
+    });
+
+    const preview = card.createDiv({ cls: "northstar-homepage-brief-preview markdown-rendered" });
+
+    if (!previewPayload.file) {
+      preview.createEl("p", {
+        cls: "goals-dashboard-empty",
+        text:
+          selectedType === "daily"
+            ? "今日日报还未创建，点击上方按钮即可创建并预览。"
+            : "当前周期 Brief 还没生成，点击上方按钮即可生成并预览。",
+      });
+      return;
+    }
+
+    try {
+      await MarkdownRenderer.render(this.app, previewPayload.markdown, preview, previewPayload.path, this);
+    } catch (error) {
+      console.error(error);
+      preview.createEl("p", {
+        cls: "goals-dashboard-empty",
+        text: "Brief 预览渲染失败，请直接打开文件查看。",
+      });
+    }
   }
 
   renderQuickFileList(card, items, options = {}) {
@@ -610,7 +676,7 @@ class HomeDashboardView extends ItemView {
     this.app.workspace.revealLeaf(leaf);
   }
 
-  async tryOpenCurrentBrief(periodType) {
+  async tryOpenCurrentBrief(periodType, options = {}) {
     try {
       const period = this.plugin.getBriefPeriodInfo(periodType, new Date());
       const briefRoot = String(this.plugin.settings?.briefRoot ?? "").replace(/^\/+|\/+$/g, "").trim();
@@ -623,9 +689,9 @@ class HomeDashboardView extends ItemView {
         return;
       }
 
-      const leaf = this.app.workspace.getLeaf("split");
-      await leaf.openFile(target, { active: true });
-      this.app.workspace.revealLeaf(leaf);
+      await this.openFileInSplit(target, {
+        preferPreview: options.preferPreview === true,
+      });
     } catch (error) {
       const code = String(error?.message ?? "");
       if (code === "invalid-brief-period") {
@@ -638,13 +704,40 @@ class HomeDashboardView extends ItemView {
     }
   }
 
-  async tryGenerateCurrentBrief(periodType) {
+  async tryGenerateCurrentBrief(periodType, options = {}) {
     try {
-      await this.plugin.openCurrentBrief(periodType);
+      const result = await this.plugin.generateBrief(periodType, new Date());
+      await this.openFileInSplit(result.file, {
+        preferPreview: options.preferPreview === true,
+      });
+      new Notice(result.created ? "Brief created." : "Brief updated.");
+      if (options.refreshBrief) {
+        this.queueRefresh();
+      }
     } catch (error) {
+      const code = String(error?.message ?? "");
+      if (code === "invalid-brief-period") {
+        new Notice("Brief 周期类型无效。", 3200);
+        return;
+      }
+
+      if (code === "brief-path-conflict") {
+        new Notice("Brief 路径冲突，存在同名文件夹或非 Markdown 文件。", 3200);
+        return;
+      }
+
       console.error(error);
       new Notice("生成 Brief 失败。", 3200);
     }
+  }
+
+  async openFileInSplit(file, options = {}) {
+    const leaf = this.app.workspace.getLeaf("split", "vertical") || this.app.workspace.getLeaf("split");
+    await leaf.openFile(file, { active: true });
+    if (options.preferPreview && leaf?.view && typeof leaf.view.setMode === "function") {
+      await leaf.view.setMode("preview");
+    }
+    this.app.workspace.revealLeaf(leaf);
   }
 
   initializeCalendarState() {
@@ -657,6 +750,58 @@ class HomeDashboardView extends ItemView {
       mode: "month",
       cursor: today,
       selected: today,
+    };
+  }
+
+  initializeBriefState() {
+    if (this.briefState) {
+      return;
+    }
+
+    this.briefState = {
+      selectedType: "yearly",
+    };
+  }
+
+  async getBriefPreviewPayload(periodType) {
+    if (periodType === "daily") {
+      const path = this.plugin.getDailyNotePathByDate(new Date());
+      const file = this.app.vault.getAbstractFileByPath(path);
+      if (!file || Array.isArray(file.children) || file.extension !== "md") {
+        return {
+          path,
+          file: null,
+          markdown: "",
+        };
+      }
+
+      const markdown = await this.app.vault.cachedRead(file);
+      return {
+        path,
+        file,
+        markdown,
+      };
+    }
+
+    const period = this.plugin.getBriefPeriodInfo(periodType, new Date());
+    const briefRoot = String(this.plugin.settings?.briefRoot ?? "").replace(/^\/+|\/+$/g, "").trim();
+    const path = briefRoot
+      ? `${briefRoot}/${period.folder}/${period.fileName}`
+      : `${period.folder}/${period.fileName}`;
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!file || Array.isArray(file.children) || file.extension !== "md") {
+      return {
+        path,
+        file: null,
+        markdown: "",
+      };
+    }
+
+    const markdown = await this.app.vault.cachedRead(file);
+    return {
+      path,
+      file,
+      markdown,
     };
   }
 
@@ -691,6 +836,17 @@ class HomeDashboardView extends ItemView {
       }
       this.calendarState.mode = "week";
       this.queueRefresh();
+    });
+
+    const previewSelectedButton = controls.createEl("button", {
+      cls: "northstar-calendar-preview-btn",
+      text: "Preview",
+    });
+    previewSelectedButton.type = "button";
+    previewSelectedButton.addEventListener("click", async () => {
+      const selectedDate = this.calendarState?.selected || this.calendarState?.cursor || new Date();
+      const dateKey = this.toDateKey(selectedDate);
+      await this.tryOpenCalendarDay(dateKey, { preferPreview: true });
     });
 
     const navigation = calendarCard.createDiv({ cls: "northstar-calendar-nav" });
@@ -771,7 +927,7 @@ class HomeDashboardView extends ItemView {
 
     const hint = calendarCard.createEl("span", {
       cls: "northstar-homepage-card-hint",
-      text: "Click a date to open or create the daily note from template.",
+      text: "Click a date to open note. Use Preview for reading mode.",
     });
     hint.title = "Missing notes are auto-created from the configured template.";
   }
@@ -995,12 +1151,18 @@ class HomeDashboardView extends ItemView {
     );
   }
 
-  async tryOpenCalendarDay(dateKey) {
+  async tryOpenCalendarDay(dateKey, options = {}) {
     try {
       const result = await this.plugin.openOrCreateDailyNoteByDateKey(dateKey, {
         openInRightSplit: true,
+        preferPreview: options.preferPreview === true,
       });
-      new Notice(result.created ? "Daily note created from template." : "Daily note opened.");
+      if (result.created) {
+        new Notice(options.preferPreview ? "Daily note created and preview opened." : "Daily note created from template.");
+        return;
+      }
+
+      new Notice(options.preferPreview ? "Daily note preview opened." : "Daily note opened.");
     } catch (error) {
       const code = String(error?.message ?? "");
       if (code === "invalid-calendar-date") {
